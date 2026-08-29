@@ -92,6 +92,12 @@
 
 - **桌面 Web 手机版二维码优先使用手动配置的后端地址**：校园网等存在 AP/客户端隔离或多网卡选错网卡的场景下，`/api/qr-info` 自动探测的局域网 IP 可能手机不可达，而桌面 Web 设置里手动填写的后端地址此前会被自动探测结果覆盖。现在二维码生成时显式配置的后端 host/port 始终优先，用户可填写手机可达的 IP、域名或内网穿透地址后再扫码；未填写时行为保持不变。更新 `tests/test_desktop_web_mobile_entry.py` 静态契约测试。
 
+## 未发布
+
+- **候选评估后端开关（eval_scorer）**：`[discovery].eval_scorer` 默认 `"llm"` 保持既有 LLM 批量评估；`"learned"` 启用 opt-in 特征化学习器打分（不可用 / 抛异常 / 长度不符时回退 LLM）。新增 `LearnedRelevanceScorer` 骨架与 `tests/test_learned_scorer.py`。
+
+## v0.3.220：Windows 推荐进程修复与保存键扩展（2026-09-09）
+
 - **修复 Windows 下高并发 JSON 原子写入偶发 WinError 5（issue #229）**：`_atomic_write_json()` 在 Windows 上多线程/多进程竞争替换同一状态文件时，`os.replace()` 会短暂抛出 `PermissionError: [WinError 5] 拒绝访问`，导致探索缓冲等状态更新丢失。现在替换阶段对瞬时 `PermissionError` 增加带随机抖动的指数退避重试，重试耗尽才向上抛出。
 
 ## v0.3.213：推荐供给与时效判断修复（2026-08-27）
