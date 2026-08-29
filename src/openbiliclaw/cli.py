@@ -1430,6 +1430,7 @@ def _build_discovery_engine() -> Any:
             getattr(discovery_cfg, "multimodal_image_timeout_seconds", 6)
         ),
         eval_prefilter_mode=str(getattr(discovery_cfg, "eval_prefilter_mode", "shadow")),
+        eval_scorer=str(getattr(discovery_cfg, "eval_scorer", "llm")),
     )
     search_strategy = SearchStrategy(
         llm_service=llm_service,
