@@ -94,7 +94,7 @@
 
 ## 未发布
 
-- **learned scorer 安全校准闭环（eval_scorer）**：`[discovery].eval_scorer` 默认 `"llm"` 保持既有行为；新增 `"shadow"` 并跑 learned + 完整 LLM、由 LLM 决定产品 relevance 并落完整隐私安全对照，人工通过只读 gate 后可显式选 `"learned"` hybrid relevance。learned 模式仍保留 LLM temporal / topic / style / franchise 元数据，且审计失败、非法分数 / 向量 / digest 或不完整 LLM 成员均 fail-open；gate 现在拒绝不完整 telemetry、零 admission 和缺失指标。设置 API / OpenClaw / 热重载同步支持三种模式；本版本不减少 LLM 调用。
+- **learned scorer 安全校准闭环（eval_scorer）**：`[discovery].eval_scorer` 默认 `"llm"` 保持既有行为，并在桌面 Web / 扩展「高级功能」中显示为 `Agent（默认）`；用户可显式切换 `Shadow（校准观察）` 或 `Learned（仅相关性，实验性）`，保存后经同一配置 API 热重载。注册策略与回填策略复用顶层 evaluator，直连发现、统一候选流水线和单条评估不再绕回默认 Agent。`shadow` 并跑 learned + 完整 LLM、由 LLM 决定产品 relevance 并落完整隐私安全对照，人工运行只读 gate 并确认通过后才应选择 `learned` hybrid relevance。learned 模式仍保留 LLM temporal / topic / style / franchise 元数据，且审计失败、非法分数 / 向量 / digest 或不完整 LLM 成员均 fail-open；gate 拒绝不完整 telemetry、零 admission 和缺失指标。切换只影响后续候选，不重算已有推荐；本版本不减少 LLM 调用。
 
 ## v0.3.220：Windows 推荐进程修复与保存键扩展（2026-09-09）
 
