@@ -9709,6 +9709,9 @@ def create_app(
     @app.post("/api/recommendations/refresh", response_model=RecommendationRefreshResponse)
     async def refresh_recommendations() -> RecommendationRefreshResponse:
         result = await _request_runtime_replenishment(reason="manual", force=True)
+        # 手动刷新后立即丢弃旧快照，避免客户端紧接着 GET /recommendations
+        # 时仍命中 1 秒缓存，导致下拉刷新看起来“没有变化”。
+        _invalidate_recommendation_snapshot()
         if not isinstance(result, dict):
             return RecommendationRefreshResponse(
                 ok=True,
