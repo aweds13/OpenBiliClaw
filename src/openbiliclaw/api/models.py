@@ -533,6 +533,12 @@ class PendingCognitionUpdateResponse(BaseModel):
     item: PendingCognitionUpdateOut | None = None
 
 
+class PendingCognitionUpdateListResponse(BaseModel):
+    """All pending (un-notified) cognition updates, oldest first."""
+
+    items: list[PendingCognitionUpdateOut] = Field(default_factory=list)
+
+
 class PendingDelightOut(BaseModel):
     """One proactive delight recommendation."""
 

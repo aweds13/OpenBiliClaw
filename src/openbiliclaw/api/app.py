@@ -12,6 +12,7 @@ import base64
 import binascii
 import copy
 import datetime as datetime_module
+import hashlib
 import inspect
 import ipaddress
 import json
@@ -126,6 +127,7 @@ from openbiliclaw.api.models import (
     NetworkConfigOut,
     NotificationAckIn,
     NotificationAckResponse,
+    PendingCognitionUpdateListResponse,
     PendingCognitionUpdateOut,
     PendingCognitionUpdateResponse,
     PendingDelightOut,
@@ -9963,6 +9965,13 @@ def create_app(
         if item is None:
             return PendingNotificationResponse(item=None)
         return PendingNotificationResponse(item=PendingNotificationOut(**item))
+    def _cognition_update_id(item: dict[str, Any]) -> str:
+        """Return a stable cognition-update id, even for legacy rows without one."""
+        existing = str(item.get("id") or "").strip()
+        if existing:
+            return existing
+        raw = f"{item.get('kind', '')}|{item.get('summary', '')}"
+        return "cog-" + hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
     @app.get(
         "/api/cognition-updates/pending",
@@ -9982,11 +9991,37 @@ def create_app(
         latest = updates[-1]
         return PendingCognitionUpdateResponse(
             item=PendingCognitionUpdateOut(
-                id=str(latest.get("id", "")),
+                id=_cognition_update_id(latest),
                 kind=str(latest.get("kind", "")),
                 summary=str(latest.get("summary", "")),
             )
         )
+
+    @app.get(
+        "/api/cognition-updates/pending-list",
+        response_model=PendingCognitionUpdateListResponse,
+    )
+    async def pending_cognition_update_list(
+        limit: int = Query(default=20, ge=1, le=50),
+    ) -> PendingCognitionUpdateListResponse:
+        load_cognition_updates = getattr(ctx.memory_manager, "load_cognition_updates", None)
+        if not callable(load_cognition_updates):
+            return PendingCognitionUpdateListResponse(items=[])
+        updates = [
+            item
+            for item in load_cognition_updates()
+            if isinstance(item, dict) and not bool(item.get("notified", False))
+        ]
+        recent = list(reversed(updates[-limit:]))
+        items = [
+            PendingCognitionUpdateOut(
+                id=_cognition_update_id(item),
+                kind=str(item.get("kind", "")),
+                summary=str(item.get("summary", "")),
+            )
+            for item in recent
+        ]
+        return PendingCognitionUpdateListResponse(items=items)
 
     @app.post(
         "/api/cognition-updates/seen",
@@ -10007,8 +10042,10 @@ def create_app(
         for item in updates:
             if not isinstance(item, dict):
                 continue
-            if str(item.get("id", "")).strip() != update_id:
+            derived_id = _cognition_update_id(item)
+            if str(item.get("id", "")).strip() != update_id and derived_id != update_id:
                 continue
+            item["id"] = str(item.get("id") or derived_id)
             item["notified"] = True
             found = True
             break
