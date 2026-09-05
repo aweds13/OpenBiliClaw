@@ -12760,8 +12760,23 @@ def create_app(
             raise HTTPException(status_code=422, detail="Comment feedback requires note.")
 
         recommendation = ctx.database.get_recommendation_by_id(payload.recommendation_id)
+        if recommendation is None and (payload.bvid.strip() or payload.item_key.strip()):
+            # Mobile can hold a stale history row id after backend restarts /
+            # migrations; fall back to the stable content identity so feedback
+            # on a currently listed card still lands on the newest row.
+            recommendation = ctx.database.get_recommendation_by_identity(
+                bvid=payload.bvid,
+                item_key=payload.item_key,
+            )
         if recommendation is None:
+            logger.warning(
+                "feedback recommendation not found: id=%s bvid=%s item_key=%s",
+                payload.recommendation_id,
+                payload.bvid,
+                payload.item_key,
+            )
             raise HTTPException(status_code=404, detail="Recommendation not found.")
+        resolved_recommendation_id = int(recommendation.get("id") or 0)
 
         from openbiliclaw.sources.event_format import (
             SOURCE_BILIBILI,
@@ -12787,7 +12802,7 @@ def create_app(
             title=rec_title,
             context=feedback_context,
             metadata={
-                "recommendation_id": payload.recommendation_id,
+                "recommendation_id": resolved_recommendation_id,
                 "bvid": recommendation.get("bvid", ""),
                 "feedback_type": feedback_type,
                 "feedback_note": note,
@@ -12815,7 +12830,7 @@ def create_app(
         stored_feedback_type = str(stored_metadata.get("feedback_type") or "").strip().lower()
         stored_note = str(stored_metadata.get("feedback_note") or "").strip()
         if (
-            stored_recommendation_id != payload.recommendation_id
+            stored_recommendation_id != resolved_recommendation_id
             or stored_feedback_type != feedback_type
             or stored_note != note
         ):
@@ -12860,7 +12875,7 @@ def create_app(
                 )
         return FeedbackResponse(
             ok=True,
-            recommendation_id=payload.recommendation_id,
+            recommendation_id=resolved_recommendation_id,
             feedback_type=feedback_type,
             event_id=item_receipt.event_id,
             duplicate=item_receipt.duplicate,

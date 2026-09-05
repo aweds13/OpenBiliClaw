@@ -1511,6 +1511,8 @@ class FeedbackIn(BaseModel):
     feedback_type: str
     note: str = ""
     request_id: IdempotencyKey
+    bvid: str = ""
+    item_key: str = ""
 
 
 class FeedbackResponse(BaseModel):

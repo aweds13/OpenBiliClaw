@@ -11557,6 +11557,48 @@ class Database:
             return None
         return dict(row)
 
+    def get_recommendation_by_identity(
+        self,
+        *,
+        bvid: str = "",
+        item_key: str = "",
+    ) -> dict[str, Any] | None:
+        """Return the newest recommendation row matching a content identity.
+
+        Used as a feedback fallback when a client holds a stale history row id
+        after backend restarts/migrations but still knows the content bvid or
+        item key.
+        """
+        if not bvid.strip() and not item_key.strip():
+            return None
+        self._ensure_fresh_read()
+        cursor = self.conn.execute(
+            """
+            SELECT
+                r.*,
+                r.topic AS topic_label,
+                c.title AS title,
+                c.up_name AS up_name,
+                COALESCE(c.content_id, r.bvid) AS content_id,
+                COALESCE(c.content_url, '') AS content_url,
+                COALESCE(c.source_platform, '') AS source_platform
+            FROM recommendations AS r
+            LEFT JOIN content_cache AS c ON c.bvid = COALESCE(
+                (SELECT bvid FROM content_cache WHERE bvid = r.bvid),
+                (SELECT bvid FROM content_cache WHERE content_id = r.bvid LIMIT 1)
+            )
+            WHERE (? != '' AND r.bvid = ?)
+               OR (? != '' AND r.item_key = ?)
+            ORDER BY r.created_at DESC, r.id DESC
+            LIMIT 1
+            """,
+            (bvid.strip(), bvid.strip(), item_key.strip(), item_key.strip()),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
     def update_recommendation_feedback(
         self,
         recommendation_id: int,
