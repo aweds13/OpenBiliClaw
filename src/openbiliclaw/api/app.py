@@ -480,6 +480,10 @@ _FIRST_PAGE_TOPUP_DEBOUNCE_SECONDS = 30.0
 # is intentionally tiny: it is a load-shedding single-flight window, not a
 # user-visible freshness policy. Mutating recommendation routes invalidate it.
 _RECOMMENDATION_SNAPSHOT_TTL_SECONDS = 1.0
+# The runtime status and activity feed aggregate several DB counts and memory
+# state. A short TTL prevents every mobile poll from paying that full cost.
+_RUNTIME_STATUS_TTL_SECONDS = 1.0
+_ACTIVITY_FEED_TTL_SECONDS = 1.0
 
 
 def _recommendation_snapshot_rows_and_expiry(
@@ -2279,6 +2283,9 @@ def create_app(
     recommendation_snapshot_expires_at = 0.0
     recommendation_snapshot_dislike_digest = ""
     recommendation_snapshot_lock = asyncio.Lock()
+    runtime_status_cache: RuntimeStatusResponse | None = None
+    runtime_status_cached_at = 0.0
+    activity_feed_cache: dict[tuple[int, str], tuple[float, ActivityFeedResponse]] = {}
 
     def _invalidate_recommendation_snapshot() -> None:
         nonlocal recommendation_snapshot_cache, recommendation_snapshot_cached_at
@@ -9122,6 +9129,13 @@ def create_app(
         limit: int = 10,
         before: str = "",
     ) -> ActivityFeedResponse:
+        nonlocal activity_feed_cache
+        cache_key = (limit, before)
+        now = time.monotonic()
+        cached = activity_feed_cache.get(cache_key)
+        if cached is not None and now - cached[0] < _ACTIVITY_FEED_TTL_SECONDS:
+            return cached[1].model_copy(deep=True)
+
         from openbiliclaw.runtime.activity_feed import ActivityFeedBuilder
 
         runtime_status: dict[str, object] = {}
@@ -9148,7 +9162,7 @@ def create_app(
         )
         payload_items = payload.get("items", [])
         item_dicts = payload_items if isinstance(payload_items, list) else []
-        return ActivityFeedResponse(
+        response = ActivityFeedResponse(
             live_summary=str(payload.get("live_summary", "")),
             headline=str(payload.get("headline", "")),
             items=[
@@ -9166,6 +9180,8 @@ def create_app(
             has_more=bool(payload.get("has_more", False)),
             next_cursor=str(payload.get("next_cursor", "")),
         )
+        activity_feed_cache[cache_key] = (time.monotonic(), response)
+        return response.model_copy(deep=True)
 
     async def _classify_new_pool_items() -> None:
         """Legacy recovery for content_cache rows that lack content features.
@@ -9728,6 +9744,14 @@ def create_app(
 
     @app.get("/api/runtime-status", response_model=RuntimeStatusResponse)
     async def runtime_status() -> RuntimeStatusResponse:
+        nonlocal runtime_status_cache, runtime_status_cached_at
+        now = time.monotonic()
+        if (
+            runtime_status_cache is not None
+            and now - runtime_status_cached_at < _RUNTIME_STATUS_TTL_SECONDS
+        ):
+            return runtime_status_cache.model_copy(deep=True)
+
         get_runtime_status = getattr(ctx.runtime_controller, "get_runtime_status", None)
         if callable(get_runtime_status):
             payload = dict(await asyncio.to_thread(get_runtime_status))
@@ -9771,7 +9795,10 @@ def create_app(
             active_runtime_data_path / "runtime" / "worker_status.json"
         )
         payload.update(worker_status_store.status_payload())
-        return RuntimeStatusResponse(**payload)
+        response = RuntimeStatusResponse(**payload)
+        runtime_status_cache = response
+        runtime_status_cached_at = time.monotonic()
+        return response.model_copy(deep=True)
 
     @app.post("/api/agent-bridge")
     async def agent_bridge(payload: dict[str, Any]) -> dict[str, Any]:
