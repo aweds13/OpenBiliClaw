@@ -1007,10 +1007,14 @@ class RecommendationEngine:
                 for rec in recommendations
             ]
             ranked_bvids = [item.bvid for item in ranked]
-            await asyncio.to_thread(
-                self._serve_outbox.append,
-                recommendation_rows,
-                ranked_bvids,
+            # Fire-and-forget: the outbox is a handoff buffer. Awaiting the
+            # thread can still stall behind worker drain on the same file.
+            asyncio.create_task(
+                asyncio.to_thread(
+                    self._serve_outbox.append,
+                    recommendation_rows,
+                    ranked_bvids,
+                )
             )
             self._last_served_bvids = frozenset(item.bvid for item in ranked if item.bvid)
             consumed = len(recommendations)
@@ -1241,10 +1245,12 @@ class RecommendationEngine:
                 # Phase 2: do not block the API hot path on the SQLite writer.
                 # Append the shown/history batch to the outbox and let the
                 # worker process it with its own database connection.
-                await asyncio.to_thread(
-                    self._serve_outbox.append,
-                    recommendation_rows,
-                    ranked_bvids,
+                asyncio.create_task(
+                    asyncio.to_thread(
+                        self._serve_outbox.append,
+                        recommendation_rows,
+                        ranked_bvids,
+                    )
                 )
                 ids = [0] * len(recommendations)
                 committed_bvids = tuple(rec.content.bvid for rec in recommendations)
