@@ -654,8 +654,6 @@ class BilibiliAPIClient:
         for item in data.get("support_formats", []) or []:
             if not isinstance(item, dict):
                 continue
-            if qn and int(item.get("quality", 0) or 0) != qn:
-                continue
             qualities.append(
                 {
                     "qn": int(item.get("quality", 0) or 0),
