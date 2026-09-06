@@ -4407,7 +4407,6 @@ class RecommendationEngine:
             excluded_bvids=excluded,
             expression_mode="precomputed",
             source_platform=source_platform,
-            fast_path=True,
         )
 
     async def append_recommendations(
@@ -4446,7 +4445,6 @@ class RecommendationEngine:
             excluded_bvids=excluded,
             expression_mode="precomputed",
             source_platform=source_platform,
-            fast_path=True,
         )
 
     async def generate_personal_topic(
