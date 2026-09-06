@@ -1166,6 +1166,7 @@ def _run_api_server(*, host: str = "127.0.0.1", port: int = 8420) -> None:
         api_host=host,
     )
     worker_process: Any | None = None
+    image_service_process: Any | None = None
     try:
         if worker_requested:
             import subprocess
@@ -1182,6 +1183,25 @@ def _run_api_server(*, host: str = "127.0.0.1", port: int = 8420) -> None:
                 f"已启动独立 full worker pid={worker_process.pid}（OPENBILICLAW_WORKER=1）",
             )
 
+        # Dedicated image proxy process: image fetching/compression lives here,
+        # so it cannot squeeze recommendation serving / reshuffle / chat APIs.
+        import subprocess
+
+        image_service_process = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "openbiliclaw.image_service",
+            ],
+            cwd=os.getcwd(),
+            env={**os.environ},
+        )
+        _print_status_panel(
+            "info",
+            "Image Proxy 进程",
+            f"已启动独立 image-proxy pid={image_service_process.pid}（端口 8421）",
+        )
+
         listeners = create_wildcard_listener_sockets(host, port)
         if listeners is None:
             uvicorn.run(api_app, host=host, port=port, log_level="info")
@@ -1194,6 +1214,12 @@ def _run_api_server(*, host: str = "127.0.0.1", port: int = 8420) -> None:
         finally:
             close_listener_sockets(listeners)
     finally:
+        if image_service_process is not None:
+            image_service_process.terminate()
+            try:
+                image_service_process.wait(timeout=5)
+            except Exception:
+                image_service_process.kill()
         if worker_process is not None:
             worker_process.terminate()
             try:
