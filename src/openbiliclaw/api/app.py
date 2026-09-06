@@ -6676,45 +6676,50 @@ def create_app(
         reports hit/miss; slow misses are logged for diagnosis.
         """
         started = time.monotonic()
-        # Prefer the dedicated image-proxy service. If it is not running
-        # (tests / standalone dev), fall back to the in-process coordinator so
-        # this route keeps working without requiring a second process.
-        try:
-            import httpx
+        # Prefer the dedicated image-proxy service. `openbiliclaw start` sets
+        # OPENBILICLAW_IMAGE_SERVICE_URL when it spawns the service; tests and
+        # standalone dev keep it empty and use the in-process coordinator so the
+        # route still works without requiring a second process.
+        service_base = os.environ.get("OPENBILICLAW_IMAGE_SERVICE_URL", "").strip()
+        if service_base:
+            try:
+                import httpx
 
-            service_base = os.environ.get(
-                "OPENBILICLAW_IMAGE_SERVICE_URL",
-                "http://127.0.0.1:8421",
-            )
-            async with httpx.AsyncClient(timeout=30) as client:
-                upstream = await client.get(
-                    f"{service_base}/api/image-proxy",
-                    params={"url": url},
-                )
-            if upstream.status_code == 200:
+                async with httpx.AsyncClient(timeout=30) as client:
+                    upstream = await client.get(
+                        f"{service_base}/api/image-proxy",
+                        params={"url": url},
+                    )
+                if upstream.status_code == 200:
+                    return Response(
+                        content=upstream.content,
+                        media_type=upstream.headers.get("content-type", "image/*"),
+                        headers={
+                            "Cache-Control": "public, max-age=86400",
+                            "X-Content-Type-Options": "nosniff",
+                            "X-Image-Cache": upstream.headers.get(
+                                "X-Image-Cache",
+                                "unknown",
+                            ),
+                        },
+                    )
+                # Non-200 from the dedicated service: forward the response to the
+                # client instead of silently passing it through the API process.
                 return Response(
                     content=upstream.content,
-                    media_type=upstream.headers.get("content-type", "image/*"),
-                    headers={
-                        "Cache-Control": "public, max-age=86400",
-                        "X-Content-Type-Options": "nosniff",
-                        "X-Image-Cache": upstream.headers.get(
-                            "X-Image-Cache",
-                            "unknown",
-                        ),
-                    },
+                    status_code=upstream.status_code,
+                    media_type=upstream.headers.get("content-type", "text/plain"),
                 )
-            # Non-200 from the dedicated service: forward the response to the
-            # client instead of silently passing it through the API process.
-            return Response(
-                content=upstream.content,
-                status_code=upstream.status_code,
-                media_type=upstream.headers.get("content-type", "text/plain"),
-            )
-        except (httpx.HTTPError, OSError, AttributeError, TypeError, ImportError):
-            # Dedicated service unavailable (or a test double without the
-            # forwarding API): fall back to the in-process coordinator.
-            pass
+            except (
+                httpx.HTTPError,
+                OSError,
+                AttributeError,
+                TypeError,
+                ImportError,
+            ):
+                # Dedicated service unavailable (or a test double without the
+                # forwarding API): fall back to the in-process coordinator.
+                pass
 
         try:
             result = await image_fetch_coordinator.fetch(url)

@@ -1201,6 +1201,13 @@ def _run_api_server(*, host: str = "127.0.0.1", port: int = 8420) -> None:
             "Image Proxy 进程",
             f"已启动独立 image-proxy pid={image_service_process.pid}（端口 8421）",
         )
+        # Main API forwards image requests to this local service.
+        image_service_port = os.environ.get(
+            "OPENBILICLAW_IMAGE_SERVICE_PORT", "8421"
+        )
+        os.environ["OPENBILICLAW_IMAGE_SERVICE_URL"] = (
+            f"http://127.0.0.1:{image_service_port}"
+        )
 
         listeners = create_wildcard_listener_sockets(host, port)
         if listeners is None:
