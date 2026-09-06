@@ -9590,6 +9590,14 @@ def create_app(
         available_count: int | None = None,
     ) -> None:
         """Fire a background Discovery refresh when the pool runs low."""
+        # In full-worker mode the worker process owns replenishment. Skipping
+        # this prevents heavy discovery/eval work from competing with API
+        # recommendation requests in the API event loop.
+        if (
+            os.environ.get("OPENBILICLAW_FULL_WORKER", "").strip() == "1"
+            or os.environ.get("OPENBILICLAW_WORKER", "").strip() == "1"
+        ):
+            return
         if not force:
             curator = getattr(ctx.recommendation_engine, "_curator", None)
             if curator is None or not hasattr(curator, "needs_replenishment"):
