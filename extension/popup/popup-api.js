@@ -450,10 +450,19 @@ export async function startInit({
   githubUsername = null,
   githubToken = null,
   llmConcurrency = null,
+  initTimeoutMinutes = null,
+  // Accept snake_case keys for callers that build a raw request payload.
+  llm_concurrency: llmConcurrencyLegacy = null,
+  init_timeout_minutes: initTimeoutMinutesLegacy = null,
 } = {}) {
   const payload = { force };
-  if (Number.isFinite(Number(llmConcurrency)) && Number(llmConcurrency) >= 1 && Number(llmConcurrency) <= 16) {
-    payload.llm_concurrency = Number(llmConcurrency);
+  const effectiveLlmConcurrency = llmConcurrency ?? llmConcurrencyLegacy;
+  if (Number.isFinite(Number(effectiveLlmConcurrency)) && Number(effectiveLlmConcurrency) >= 1 && Number(effectiveLlmConcurrency) <= 16) {
+    payload.llm_concurrency = Number(effectiveLlmConcurrency);
+  }
+  const effectiveInitTimeoutMinutes = initTimeoutMinutes ?? initTimeoutMinutesLegacy;
+  if (Number.isFinite(Number(effectiveInitTimeoutMinutes)) && Number(effectiveInitTimeoutMinutes) >= 1 && Number(effectiveInitTimeoutMinutes) <= 1440) {
+    payload.init_timeout_minutes = Number(effectiveInitTimeoutMinutes);
   }
   // Only attach an explicit per-run platform selection when given; omitting it
   // lets the backend fall back to all config-enabled sources (legacy behaviour).

@@ -5352,6 +5352,7 @@ def create_app(
         force: bool = False,
         reset_cognition: bool = False,
         llm_concurrency: int | None = None,
+        init_timeout_minutes: float | None = None,
     ) -> None:
         """Sole status/event writer for an API-launched guided init (gui-init
         §5f). Drives the shared ``run_guided_init`` through the coordinator and
@@ -5424,6 +5425,15 @@ def create_app(
             heartbeat_task = asyncio.create_task(_run_init_heartbeat(coord, run_id))
             enabled = set(ctx.init_prereqs.enabled_platforms())
             effective = _select_init_platforms(enabled, selected_sources)
+            run_guided_init_kwargs: dict[str, float] = {}
+            if init_timeout_minutes is not None and init_timeout_minutes > 0:
+                timeout_seconds = max(1, int(float(init_timeout_minutes) * 60))
+                run_guided_init_kwargs = {
+                    "collection_timeout_seconds": float(timeout_seconds),
+                    "profile_analysis_timeout_seconds": float(timeout_seconds),
+                    "profile_build_timeout_seconds": float(timeout_seconds),
+                    "discovery_timeout_seconds": float(timeout_seconds),
+                }
             result = await run_guided_init(
                 client=ctx.bilibili_client,
                 memory=ctx.memory_manager,
@@ -5458,6 +5468,7 @@ def create_app(
                 # from a previous account) before the new profile build.
                 reset_cognition=reset_cognition,
                 llm_concurrency=llm_concurrency,
+                **run_guided_init_kwargs,
             )
             discovery_partial = bool(result.discovery_error)
             dy_status = str(getattr(result, "dy_status", "skipped") or "skipped")
@@ -5628,6 +5639,33 @@ def create_app(
                     },
                     status_code=400,
                 )
+        # Optional per-run single init timeout applied to all four stages.
+        # Omitted/None keeps the backend defaults; 1-1440 is accepted in minutes.
+        raw_init_timeout_minutes = (
+            body.get("init_timeout_minutes") if isinstance(body, dict) else None
+        )
+        if raw_init_timeout_minutes is None:
+            init_timeout_minutes: float | None = None
+        else:
+            try:
+                init_timeout_minutes = float(raw_init_timeout_minutes)
+            except (TypeError, ValueError):
+                return JSONResponse(
+                    {
+                        "error": "invalid_init_timeout_minutes",
+                        "detail": "init_timeout_minutes 必须是数字（分钟）",
+                    },
+                    status_code=400,
+                )
+            if init_timeout_minutes <= 0 or init_timeout_minutes > 1440:
+                return JSONResponse(
+                    {
+                        "error": "invalid_init_timeout_minutes",
+                        "detail": "init_timeout_minutes 必须在 1-1440 分钟之间",
+                    },
+                    status_code=400,
+                )
+
         # Optional per-run platform selection from the extension checkboxes. A
         # list (even empty) is an explicit choice; absent → None = use all
         # enabled (CLI / legacy clients). Sent source keys are explicit opt-ins
@@ -6203,6 +6241,7 @@ def create_app(
                     force=force,
                     reset_cognition=reset_cognition,
                     llm_concurrency=llm_concurrency,
+                    init_timeout_minutes=init_timeout_minutes,
                 ),
             )
         else:
@@ -6218,6 +6257,7 @@ def create_app(
                     force=force,
                     reset_cognition=reset_cognition,
                     llm_concurrency=llm_concurrency,
+                    init_timeout_minutes=init_timeout_minutes,
                 )
             )
         coord.attach_task(run_id, task)

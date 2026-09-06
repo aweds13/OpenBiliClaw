@@ -16912,6 +16912,40 @@ class TestGuidedInitEndpoints:
             self._drive_until(client, captured, key="llm_concurrency")
         assert captured["llm_concurrency"] == 2
 
+    def test_init_rejects_invalid_timeout(self, tmp_path: Path) -> None:
+        from fastapi.testclient import TestClient
+
+        app, db = self._make_app(tmp_path)
+        with TestClient(app) as client:
+            for bad in (0, 1500, "abc"):
+                resp = client.post(
+                    "/api/init",
+                    json={"sources": ["xiaohongshu"], "init_timeout_minutes": bad},
+                )
+                assert resp.status_code == 400
+                assert resp.json()["error"] == "invalid_init_timeout_minutes"
+        assert db.get_latest_init_run() is None
+
+    def test_init_passes_timeout_to_pipeline(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        prereqs = _FakeInitPrereqs(bili="ok", chat=True, platforms=["douyin"])
+        app, _ = self._make_app(tmp_path, prereqs=prereqs)
+        captured = self._capture_run_guided_init(monkeypatch)
+        with TestClient(app) as client:
+            resp = client.post(
+                "/api/init",
+                json={"sources": ["douyin"], "init_timeout_minutes": 75},
+            )
+            assert resp.status_code == 202, resp.text
+            self._drive_until(client, captured, key="collection_timeout_seconds")
+        assert captured["collection_timeout_seconds"] == 75 * 60
+        assert captured["profile_analysis_timeout_seconds"] == 75 * 60
+        assert captured["profile_build_timeout_seconds"] == 75 * 60
+        assert captured["discovery_timeout_seconds"] == 75 * 60
+
     def test_init_rejects_docker_runtime(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

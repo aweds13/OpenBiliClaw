@@ -108,6 +108,7 @@
       initGitHubUsernamePrefilled: false,
       initGitHubToken: "",
       initLlmConcurrency: 3,
+      initTimeoutMinutes: 60,
       activity: null,
       activityItems: [],
       activityCursor: "",
@@ -2405,6 +2406,10 @@
         ? Number(state.initLlmConcurrency)
         : 3;
       const llmConcurrencyRow = `<label class="init-source-row"><span>初始化 LLM 并发（1-16，默认 3；越小越不容易限流）</span><input id="initLlmConcurrency" type="number" min="1" max="16" step="1" inputmode="numeric" value="${llmConcurrencyValue}"></label>`;
+      const initTimeoutValue = Number.isFinite(Number(state.initTimeoutMinutes))
+        ? Number(state.initTimeoutMinutes)
+        : 60;
+      const initTimeoutRow = `<label class="init-source-row"><span>初始化总超时（分钟，1-1440，默认 60；越长越能容忍慢模型）</span><input id="initTimeoutMinutes" type="number" min="1" max="1440" step="1" inputmode="numeric" value="${initTimeoutValue}"></label>`;
       const rows = INIT_SOURCE_OPTIONS.map((opt) => {
         const checked = selected.has(opt.key) ? " checked" : "";
         const label = opt.defaultChecked ? `${opt.label}（推荐）` : opt.label;
@@ -2426,7 +2431,7 @@
       const githubInput = `<label class="init-source-row"><span>GitHub 公开用户名（可留空，仅启用公开仓库发现）</span><input id="initGitHubUsername" maxlength="39" autocomplete="off" autocapitalize="off" spellcheck="false" value="${escapeHtml(githubUsername)}"${githubDisabled}></label>`;
       const githubTokenInput = `<label class="init-source-row"><span>GitHub Personal Access Token（可选）</span><input id="initGitHubToken" type="password" maxlength="512" autocomplete="off" value="${escapeHtml(state.initGitHubToken || "")}"${githubDisabled}></label>`;
       const githubTokenHint = `<p class="init-sources-hint">GitHub 仅导入公开 starred repositories。公开用户名可直接使用；PAT 只用于确认账号身份和提高官方 API 限额，不读取私有仓库。两者都留空时仍可启用公开仓库发现。<a href="https://github.com/whiteguo233/OpenBiliClaw/blob/main/docs/modules/github.md#pat-获取与安全" target="_blank" rel="noopener noreferrer">PAT 与安全说明</a></p>`;
-      return `<div class="init-sources"><p class="init-sources-title">选择初始化数据来源（至少一个）</p>${rows}${llmConcurrencyRow}${bangumiInput}${bangumiTokenInput}${bangumiTokenHint}${githubInput}${githubTokenInput}${githubTokenHint}<p class="init-sources-hint">${escapeHtml(INIT_SOURCE_LOGIN_HINT)}</p></div>`;
+      return `<div class="init-sources"><p class="init-sources-title">选择初始化数据来源（至少一个）</p>${rows}${llmConcurrencyRow}${initTimeoutRow}${bangumiInput}${bangumiTokenInput}${bangumiTokenHint}${githubInput}${githubTokenInput}${githubTokenHint}<p class="init-sources-hint">${escapeHtml(INIT_SOURCE_LOGIN_HINT)}</p></div>`;
     }
 
     function initOnboardingPhase(status, progress) {
@@ -2615,6 +2620,10 @@
         const value = Number(event.currentTarget.value);
         state.initLlmConcurrency = Number.isFinite(value) && value >= 1 && value <= 16 ? value : 3;
       });
+      grid.querySelector("#initTimeoutMinutes")?.addEventListener("input", (event) => {
+        const value = Number(event.currentTarget.value);
+        state.initTimeoutMinutes = Number.isFinite(value) && value >= 1 && value <= 1440 ? value : 60;
+      });
     }
 
     function clearInitPolling() {
@@ -2786,9 +2795,13 @@
       }
       try {
         const initLlmConcurrency = Number($("#initLlmConcurrency")?.value || state.initLlmConcurrency || 3);
+        const initTimeoutMinutes = Number($("#initTimeoutMinutes")?.value || state.initTimeoutMinutes || 60);
         const payload = { sources: selected };
         if (Number.isFinite(initLlmConcurrency) && initLlmConcurrency >= 1 && initLlmConcurrency <= 16) {
           payload.llm_concurrency = initLlmConcurrency;
+        }
+        if (Number.isFinite(initTimeoutMinutes) && initTimeoutMinutes >= 1 && initTimeoutMinutes <= 1440) {
+          payload.init_timeout_minutes = initTimeoutMinutes;
         }
         const sourceOptions = {};
         if (selected.includes("bangumi") && (sendBangumiUsername || bangumiToken)) {
@@ -2939,6 +2952,10 @@
         const reinitLlmConcurrency = Number($("#reinitLlmConcurrency")?.value || 3);
         if (Number.isFinite(reinitLlmConcurrency) && reinitLlmConcurrency >= 1 && reinitLlmConcurrency <= 16) {
           payload.llm_concurrency = reinitLlmConcurrency;
+        }
+        const reinitTimeoutMinutes = Number($("#reinitTimeoutMinutes")?.value || 60);
+        if (Number.isFinite(reinitTimeoutMinutes) && reinitTimeoutMinutes >= 1 && reinitTimeoutMinutes <= 1440) {
+          payload.init_timeout_minutes = reinitTimeoutMinutes;
         }
         await requestJsonStrict(ENDPOINTS.startInit, {
           method: "POST",

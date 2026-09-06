@@ -394,6 +394,7 @@
     let initGitHubUsername = "", initGitHubUsernameTouched = false, initGitHubUsernamePrefilled = false;
     let initGitHubToken = "";
     let initLlmConcurrency = 3;
+    let initTimeoutMinutes = 60;
     // Providers whose api_key is already persisted server-side (GET /api/config
     // returns it masked). Lets a relaunch save step 0 without re-pasting the
     // key: PUT /api/config only touches fields present in the payload.
@@ -1115,6 +1116,25 @@
       });
       llmConcurrencyDetail.append(llmConcurrencyText, llmConcurrencyInput);
       root.append(llmConcurrencyDetail);
+        const initTimeoutDetail = document.createElement("label");
+        initTimeoutDetail.className = "init-source-detail";
+        const initTimeoutText = document.createElement("span");
+        initTimeoutText.textContent = "初始化总超时（分钟，1-1440，默认 60；越长越能容忍慢模型）";
+        const initTimeoutInput = document.createElement("input");
+        initTimeoutInput.id = "initTimeoutMinutes";
+        initTimeoutInput.type = "number";
+        initTimeoutInput.min = "1";
+        initTimeoutInput.max = "1440";
+        initTimeoutInput.step = "1";
+        initTimeoutInput.inputMode = "numeric";
+        initTimeoutInput.value = String(initTimeoutMinutes);
+        initTimeoutInput.addEventListener("input", () => {
+          const value = Number(initTimeoutInput.value);
+          initTimeoutMinutes = Number.isFinite(value) && value >= 1 && value <= 1440 ? value : 60;
+        });
+        initTimeoutDetail.append(initTimeoutText, initTimeoutInput);
+        root.append(initTimeoutDetail);
+
       const bangumiDetail = document.createElement("label");
       bangumiDetail.className = "init-source-detail";
       const bangumiText = document.createElement("span");
@@ -1221,6 +1241,13 @@
       const value = Number(input ? input.value : initLlmConcurrency);
       return Number.isFinite(value) && value >= 1 && value <= 16 ? value : 3;
     }
+
+    function readInitTimeoutMinutes() {
+      const input = $("#initTimeoutMinutes");
+      const value = Number(input ? input.value : initTimeoutMinutes);
+      return Number.isFinite(value) && value >= 1 && value <= 1440 ? value : 60;
+    }
+
 
     function renderInitChecklist(status, selected = null) {
       const root = $("#initChecklist");
@@ -1797,7 +1824,7 @@
 
       let startBody = {};
       try {
-        const payload = { sources: selected, llm_concurrency: readInitLlmConcurrency() };
+        const payload = { sources: selected, llm_concurrency: readInitLlmConcurrency(), init_timeout_minutes: readInitTimeoutMinutes() };
         const sourceOptions = {};
         if (selected.includes("bangumi") && (sendBangumiUsername || bangumiToken)) {
           const bangumi = {};

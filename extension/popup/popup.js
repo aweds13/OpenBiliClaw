@@ -217,6 +217,7 @@ const state = {
   initGitHubUsernamePrefilled: false,
   initGitHubToken: "",
   initLlmConcurrency: 3,
+  initTimeoutMinutes: 60,
   backendUpdateStatus: null,
   activityFeed: null,
   activityExpanded: false,
@@ -2083,6 +2084,24 @@ function _renderInitSources() {
   });
   llmConcurrencyRow.append(llmConcurrencyLabel, llmConcurrencyInput);
   elements.initSources.append(llmConcurrencyRow);
+  const initTimeoutRow = document.createElement("label");
+  initTimeoutRow.className = "init-source-row";
+  const initTimeoutLabel = document.createElement("span");
+  initTimeoutLabel.textContent = "初始化总超时（分钟，1-1440，默认 60；越长越能容忍慢模型）";
+  const initTimeoutInput = document.createElement("input");
+  initTimeoutInput.id = "initTimeoutMinutes";
+  initTimeoutInput.type = "number";
+  initTimeoutInput.min = "1";
+  initTimeoutInput.max = "1440";
+  initTimeoutInput.step = "1";
+  initTimeoutInput.inputMode = "numeric";
+  initTimeoutInput.value = String(state.initTimeoutMinutes);
+  initTimeoutInput.addEventListener("input", () => {
+    const value = Number(initTimeoutInput.value);
+    state.initTimeoutMinutes = Number.isFinite(value) && value >= 1 && value <= 1440 ? value : 60;
+  });
+  initTimeoutRow.append(initTimeoutLabel, initTimeoutInput);
+  elements.initSources.append(initTimeoutRow);
   const bangumiRow = document.createElement("label");
   bangumiRow.className = "init-source-row";
   const bangumiLabel = document.createElement("span");
@@ -2268,6 +2287,13 @@ function _readInitLlmConcurrency() {
   const value = Number(input ? input.value : state.initLlmConcurrency);
   state.initLlmConcurrency = Number.isFinite(value) && value >= 1 && value <= 16 ? value : 4;
   return state.initLlmConcurrency;
+}
+
+function _readInitTimeoutMinutes() {
+  const input = document.getElementById("initTimeoutMinutes");
+  const value = Number(input ? input.value : state.initTimeoutMinutes);
+  state.initTimeoutMinutes = Number.isFinite(value) && value >= 1 && value <= 1440 ? value : 60;
+  return state.initTimeoutMinutes;
 }
 
 // Decide what Bangumi username (if any) guided init should send, delegating the
@@ -2629,6 +2655,7 @@ async function handleStartInitClick() {
       githubUsername: githubUsernameOption,
       githubToken: githubTokenOption,
       llmConcurrency: _readInitLlmConcurrency(),
+      initTimeoutMinutes: _readInitTimeoutMinutes(),
     });
   } catch (error) {
     _renderInitChecklist(status, selectedSources);
@@ -11076,6 +11103,10 @@ function bindSettings() {
         const reinitLlmConcurrency = Number(document.getElementById("cfgReinitLlmConcurrency")?.value || 3);
         if (Number.isFinite(reinitLlmConcurrency) && reinitLlmConcurrency >= 1 && reinitLlmConcurrency <= 16) {
           payload.llm_concurrency = reinitLlmConcurrency;
+        }
+        const reinitTimeoutMinutes = Number(document.getElementById("cfgReinitTimeoutMinutes")?.value || 60);
+        if (Number.isFinite(reinitTimeoutMinutes) && reinitTimeoutMinutes >= 1 && reinitTimeoutMinutes <= 1440) {
+          payload.init_timeout_minutes = reinitTimeoutMinutes;
         }
         await startInit(payload);
         showToast("重新初始化已开始，正在重新拉取数据并重建画像", "success");
