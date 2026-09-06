@@ -3422,7 +3422,7 @@ class ContentDiscoveryEngine:
                     "system_instruction": messages[0]["content"],
                     "user_input": messages[1]["content"],
                     "image_inputs": image_inputs,
-                    "max_tokens": 4096,
+                    "max_tokens": 8192,
                     "reasoning_effort": None,
                     "caller": "discovery.evaluate_batch",
                 }
@@ -3436,9 +3436,10 @@ class ContentDiscoveryEngine:
                     # This task is structured scoring (return JSON array), not
                     # open-ended reasoning. Some reasoning-first
                     # OpenAI-compatible models reject the empty string, so we
-                    # send "low" instead of "". 4096 max_tokens covers the
-                    # observed 1500-3000 token output of a 30-item JSON array.
-                    "max_tokens": 4096,
+                    # send "low" instead of "". 8192 max_tokens leaves room
+                    # for reasoning-first models that emit a short thinking
+                    # segment plus the 1500-3000 token structured output.
+                    "max_tokens": 8192,
                     "caller": "discovery.evaluate_batch",
                 }
                 from openbiliclaw.llm.task_options import call_accepts_keyword

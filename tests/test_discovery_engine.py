@@ -1853,7 +1853,7 @@ async def test_text_batch_evaluation_bounds_declared_output_tokens() -> None:
     )
 
     assert scores == [0.8] * 8
-    assert llm_service.max_tokens == [4096]
+    assert llm_service.max_tokens == [8192]
 
 
 @pytest.mark.asyncio
@@ -1935,7 +1935,7 @@ async def test_multimodal_evaluation_sends_prepared_cover_images(monkeypatch) ->
     ]
     assert '"cover_image_ref":"cover:0"' in llm_service.user_inputs[0]
     assert "cover-0" not in llm_service.user_inputs[0]
-    assert llm_service.max_tokens == [4096]
+    assert llm_service.max_tokens == [8192]
 
 
 @pytest.mark.asyncio
