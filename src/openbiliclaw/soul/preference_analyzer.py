@@ -53,6 +53,9 @@ PREFERENCE_CHUNK_MAX_TOKENS = 4096
 PREFERENCE_REASONING_FALLBACK_MAX_TOKENS = DEFAULT_STRUCTURED_MAX_TOKENS
 PREFERENCE_RATE_LIMIT_MAX_RETRIES = 2
 PREFERENCE_RATE_LIMIT_RETRY_SECONDS = 65.0
+# Fallback only when no registry concurrency is available. Explicit values are
+# honored without a hard upper cap so users can push fan-out as high as their
+# provider / local state permit.
 MAX_CONCURRENT_PREFERENCE_CHUNKS = 16
 INIT_COGNITION_CONTEXT_KEY = "_init_cognition_context"
 _INIT_AWARENESS_CANDIDATES_CAP = 12
@@ -839,7 +842,7 @@ class PreferenceAnalyzer:
             )
         except (TypeError, ValueError):
             configured_chunk_limit = MAX_CONCURRENT_PREFERENCE_CHUNKS
-        chunk_limit = max(1, min(MAX_CONCURRENT_PREFERENCE_CHUNKS, configured_chunk_limit))
+        chunk_limit = max(1, configured_chunk_limit)
         logger.info(
             "preference chunk fanout bounded at %d (configured LLM concurrency=%r%s)",
             chunk_limit,

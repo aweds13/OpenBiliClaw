@@ -348,7 +348,7 @@
       already_initialized: "已经初始化过了；如需重建，请到设置页。",
       local_only: "只能在本机发起初始化。",
       no_sources_selected: "至少勾选一个数据来源。",
-      invalid_llm_concurrency: "初始化 LLM 并发必须是 1-16 的整数。",
+      invalid_llm_concurrency: "初始化 LLM 并发必须是正整数。",
       no_profile_signal_sources: "所选来源暂时没有可用的个人画像信号；请按该来源提示补充个人令牌、公开用户名，或先在对应网站登录并连接扩展（如 bgm.tv）。",
       linuxdo_bootstrap_not_ready: "Linux.do 公开发现无需登录；收藏、点赞和阅读记录初始化需要浏览器已登录 linux.do。",
       v2ex_bootstrap_not_ready: "V2EX 账号初始化尚未就绪。请在浏览器登录 v2ex.com，并保持 OpenBiliClaw 扩展已连接。",
@@ -1101,18 +1101,17 @@
       const llmConcurrencyDetail = document.createElement("label");
       llmConcurrencyDetail.className = "init-source-detail";
       const llmConcurrencyText = document.createElement("span");
-      llmConcurrencyText.textContent = "初始化 LLM 并发（1-16，默认 3；越小越不容易限流）";
+      llmConcurrencyText.textContent = "初始化 LLM 并发（正整数，默认 3；越小越不容易限流）";
       const llmConcurrencyInput = document.createElement("input");
       llmConcurrencyInput.id = "initLlmConcurrency";
       llmConcurrencyInput.type = "number";
       llmConcurrencyInput.min = "1";
-      llmConcurrencyInput.max = "16";
       llmConcurrencyInput.step = "1";
       llmConcurrencyInput.inputMode = "numeric";
       llmConcurrencyInput.value = String(initLlmConcurrency);
       llmConcurrencyInput.addEventListener("input", () => {
         const value = Number(llmConcurrencyInput.value);
-        initLlmConcurrency = Number.isFinite(value) && value >= 1 && value <= 16 ? value : 3;
+        initLlmConcurrency = Number.isFinite(value) && value >= 1 ? value : 3;
       });
       llmConcurrencyDetail.append(llmConcurrencyText, llmConcurrencyInput);
       root.append(llmConcurrencyDetail);
@@ -1239,7 +1238,7 @@
     function readInitLlmConcurrency() {
       const input = $("#initLlmConcurrency");
       const value = Number(input ? input.value : initLlmConcurrency);
-      return Number.isFinite(value) && value >= 1 && value <= 16 ? value : 3;
+      return Number.isFinite(value) && value >= 1 ? value : 3;
     }
 
     function readInitTimeoutMinutes() {

@@ -344,7 +344,7 @@
               <button class="pill-btn" id="probeLlmChain" type="button">测试整条链</button>
             </div>
             <div class="llm-runtime-tuning">
-              <label class="settings-field"><span>LLM 并发数</span><input id="llmConcurrency" type="number" min="1" max="16" inputmode="numeric" placeholder="3"></label>
+              <label class="settings-field"><span>LLM 并发数</span><input id="llmConcurrency" type="number" min="1" inputmode="numeric" placeholder="3"></label>
               <label class="settings-field"><span>单实例超时（秒）</span><input id="llmTimeout" type="number" min="10" max="1200" inputmode="numeric" placeholder="1200"></label>
             </div>
             <ol class="llm-chain-list" id="llmDefaultChain" aria-label="默认 LLM 调用链"></ol>
@@ -1352,7 +1352,7 @@
               </label>
               <label class="settings-reinit-option" title="本次重建画像时使用的 LLM 并发数，默认 3；限流严重时可降到 1-2">
                 <span>初始化 LLM 并发</span>
-                <input id="reinitLlmConcurrency" type="number" min="1" max="16" step="1" inputmode="numeric" value="3" data-settings-ignore-dirty>
+                <input id="reinitLlmConcurrency" type="number" min="1" step="1" inputmode="numeric" value="3" data-settings-ignore-dirty>
               </label>
               <label class="settings-reinit-option" title="本次初始化所有阶段的总超时上限，默认 60 分钟；网络或模型很慢时可调大">
                 <span>初始化总超时（分钟）</span>

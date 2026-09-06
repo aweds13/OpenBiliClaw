@@ -2069,18 +2069,17 @@ function _renderInitSources() {
   const llmConcurrencyRow = document.createElement("label");
   llmConcurrencyRow.className = "init-source-row";
   const llmConcurrencyLabel = document.createElement("span");
-  llmConcurrencyLabel.textContent = "初始化 LLM 并发（1-16，默认 3；越小越不容易限流）";
+  llmConcurrencyLabel.textContent = "初始化 LLM 并发（正整数，默认 3；越小越不容易限流）";
   const llmConcurrencyInput = document.createElement("input");
   llmConcurrencyInput.id = "initLlmConcurrency";
   llmConcurrencyInput.type = "number";
   llmConcurrencyInput.min = "1";
-  llmConcurrencyInput.max = "16";
   llmConcurrencyInput.step = "1";
   llmConcurrencyInput.inputMode = "numeric";
   llmConcurrencyInput.value = String(state.initLlmConcurrency);
   llmConcurrencyInput.addEventListener("input", () => {
     const value = Number(llmConcurrencyInput.value);
-    state.initLlmConcurrency = Number.isFinite(value) && value >= 1 && value <= 16 ? value : 3;
+    state.initLlmConcurrency = Number.isFinite(value) && value >= 1 ? value : 3;
   });
   llmConcurrencyRow.append(llmConcurrencyLabel, llmConcurrencyInput);
   elements.initSources.append(llmConcurrencyRow);
@@ -2285,7 +2284,7 @@ function _readInitGitHubToken() {
 function _readInitLlmConcurrency() {
   const input = document.getElementById("initLlmConcurrency");
   const value = Number(input ? input.value : state.initLlmConcurrency);
-  state.initLlmConcurrency = Number.isFinite(value) && value >= 1 && value <= 16 ? value : 4;
+  state.initLlmConcurrency = Number.isFinite(value) && value >= 1 ? value : 4;
   return state.initLlmConcurrency;
 }
 
@@ -11101,7 +11100,7 @@ function bindSettings() {
         const payload = { force: true };
         if (resetCognition) payload.reset_cognition = true;
         const reinitLlmConcurrency = Number(document.getElementById("cfgReinitLlmConcurrency")?.value || 3);
-        if (Number.isFinite(reinitLlmConcurrency) && reinitLlmConcurrency >= 1 && reinitLlmConcurrency <= 16) {
+        if (Number.isFinite(reinitLlmConcurrency) && reinitLlmConcurrency >= 1) {
           payload.llm_concurrency = reinitLlmConcurrency;
         }
         const reinitTimeoutMinutes = Number(document.getElementById("cfgReinitTimeoutMinutes")?.value || 60);

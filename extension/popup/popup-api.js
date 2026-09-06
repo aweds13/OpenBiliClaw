@@ -457,7 +457,7 @@ export async function startInit({
 } = {}) {
   const payload = { force };
   const effectiveLlmConcurrency = llmConcurrency ?? llmConcurrencyLegacy;
-  if (Number.isFinite(Number(effectiveLlmConcurrency)) && Number(effectiveLlmConcurrency) >= 1 && Number(effectiveLlmConcurrency) <= 16) {
+  if (Number.isFinite(Number(effectiveLlmConcurrency)) && Number(effectiveLlmConcurrency) >= 1) {
     payload.llm_concurrency = Number(effectiveLlmConcurrency);
   }
   const effectiveInitTimeoutMinutes = initTimeoutMinutes ?? initTimeoutMinutesLegacy;

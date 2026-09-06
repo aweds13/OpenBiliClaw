@@ -252,7 +252,7 @@
       already_initialized: "已经初始化过了；如需重建，请到设置页。",
       local_only: "只能在本机发起初始化。",
       no_sources_selected: "至少勾选一个数据来源。",
-      invalid_llm_concurrency: "初始化 LLM 并发必须是 1-16 的整数。",
+      invalid_llm_concurrency: "初始化 LLM 并发必须是正整数。",
       no_profile_signal_sources: "所选来源暂时没有可用的个人画像信号；请按该来源提示补充个人令牌、公开用户名，或先在对应网站登录并连接扩展（如 bgm.tv）。",
       invalid_bangumi_access_token: "Bangumi 个人令牌被拒绝（缺失、错误或已过期）。请到 next.bgm.tv/demo/access-token 重新生成后重试。",
       bangumi_token_check_failed: "校验 Bangumi 令牌时无法连接 Bangumi，请稍后重试。",
@@ -2405,7 +2405,7 @@
       const llmConcurrencyValue = Number.isFinite(Number(state.initLlmConcurrency))
         ? Number(state.initLlmConcurrency)
         : 3;
-      const llmConcurrencyRow = `<label class="init-source-row"><span>初始化 LLM 并发（1-16，默认 3；越小越不容易限流）</span><input id="initLlmConcurrency" type="number" min="1" max="16" step="1" inputmode="numeric" value="${llmConcurrencyValue}"></label>`;
+      const llmConcurrencyRow = `<label class="init-source-row"><span>初始化 LLM 并发（正整数，默认 3；越小越不容易限流）</span><input id="initLlmConcurrency" type="number" min="1" step="1" inputmode="numeric" value="${llmConcurrencyValue}"></label>`;
       const initTimeoutValue = Number.isFinite(Number(state.initTimeoutMinutes))
         ? Number(state.initTimeoutMinutes)
         : 60;
@@ -2618,7 +2618,7 @@
       });
       grid.querySelector("#initLlmConcurrency")?.addEventListener("input", (event) => {
         const value = Number(event.currentTarget.value);
-        state.initLlmConcurrency = Number.isFinite(value) && value >= 1 && value <= 16 ? value : 3;
+        state.initLlmConcurrency = Number.isFinite(value) && value >= 1 ? value : 3;
       });
       grid.querySelector("#initTimeoutMinutes")?.addEventListener("input", (event) => {
         const value = Number(event.currentTarget.value);
@@ -2797,7 +2797,7 @@
         const initLlmConcurrency = Number($("#initLlmConcurrency")?.value || state.initLlmConcurrency || 3);
         const initTimeoutMinutes = Number($("#initTimeoutMinutes")?.value || state.initTimeoutMinutes || 60);
         const payload = { sources: selected };
-        if (Number.isFinite(initLlmConcurrency) && initLlmConcurrency >= 1 && initLlmConcurrency <= 16) {
+        if (Number.isFinite(initLlmConcurrency) && initLlmConcurrency >= 1) {
           payload.llm_concurrency = initLlmConcurrency;
         }
         if (Number.isFinite(initTimeoutMinutes) && initTimeoutMinutes >= 1 && initTimeoutMinutes <= 1440) {
@@ -2950,7 +2950,7 @@
         const payload = { force: true };
         if (resetCognition) payload.reset_cognition = true;
         const reinitLlmConcurrency = Number($("#reinitLlmConcurrency")?.value || 3);
-        if (Number.isFinite(reinitLlmConcurrency) && reinitLlmConcurrency >= 1 && reinitLlmConcurrency <= 16) {
+        if (Number.isFinite(reinitLlmConcurrency) && reinitLlmConcurrency >= 1) {
           payload.llm_concurrency = reinitLlmConcurrency;
         }
         const reinitTimeoutMinutes = Number($("#reinitTimeoutMinutes")?.value || 60);

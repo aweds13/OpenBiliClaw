@@ -19,7 +19,7 @@ const REASON_TEXT = {
   already_initialized: "已经初始化过了；如需重建，请到设置页。",
   local_only: "只能在本机发起初始化。",
   no_sources_selected: "至少勾选一个数据来源。",
-  invalid_llm_concurrency: "初始化 LLM 并发必须是 1-16 的整数。",
+  invalid_llm_concurrency: "初始化 LLM 并发必须是正整数。",
   no_profile_signal_sources:
     "所选来源缺少可用于画像初始化的账号信号；请按该来源提示补充个人令牌、公开用户名，或先在对应网站登录并连接扩展（如 bgm.tv）。",
   invalid_bangumi_access_token: "Bangumi 个人令牌被拒绝（缺失、错误或已过期）。请到 next.bgm.tv/demo/access-token 重新生成后重试。",
