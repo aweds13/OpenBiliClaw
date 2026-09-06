@@ -661,25 +661,25 @@ async def test_complete_with_core_memory_can_skip_core_memory_for_cacheable_eval
     assert "你是内容评估助手。" in system_content
     assert "## 用户画像" not in system_content
     assert registry.calls[0][1]["content"] == "请评估这个视频。"
-    assert registry.reasoning_efforts == [""]
+    assert registry.reasoning_efforts == ["low"]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("caller", "requested", "expected"),
     [
-        ("discovery.x.keyword_gen", None, ""),
-        ("recommendation.expression", None, ""),
-        ("sources.xhs.keyword_gen", None, ""),
-        ("yt_search.generate_queries", None, ""),
-        ("runtime.bilibili_extension_search.queries", None, ""),
-        ("eval.query_quality", None, ""),
+        ("discovery.x.keyword_gen", None, "low"),
+        ("recommendation.expression", None, "low"),
+        ("sources.xhs.keyword_gen", None, "low"),
+        ("yt_search.generate_queries", None, "low"),
+        ("runtime.bilibili_extension_search.queries", None, "low"),
+        ("eval.query_quality", None, "low"),
         ("eval.scenario_gen", None, None),
         ("soul.profile_build", None, None),
         ("discovery.evaluate_batch", "max", "max"),
     ],
 )
-async def test_channel_callers_default_to_no_reasoning(
+async def test_channel_callers_default_to_low_reasoning(
     caller: str,
     requested: str | None,
     expected: str | None,
@@ -772,7 +772,7 @@ async def test_complete_multimodal_structured_task_sends_text_and_images() -> No
     )
 
     assert registry.json_modes == [True]
-    assert registry.reasoning_efforts == [""]
+    assert registry.reasoning_efforts == ["low"]
     assert registry.calls[0][0]["content"] == (
         "输出 json。\n\n以下是当前用户的 core memory，请作为理解背景：\n\n## 用户画像\nportrait"
     )

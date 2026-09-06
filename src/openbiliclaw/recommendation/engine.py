@@ -2187,8 +2187,9 @@ class RecommendationEngine:
             user_input=messages[1]["content"],
             max_tokens=8192,
             # v0.3.51+: structured XHS classification — pure score +
-            # categorical fields, doesn't benefit from reasoning chain.
-            reasoning_effort="",
+            # categorical fields, doesn't need deep reasoning; send low
+            # portable effort because some models reject empty reasoning.
+            reasoning_effort="low",
             caller="recommendation.evaluate_batch",
             **without_core_memory_kwargs(complete_structured),
         )
@@ -4074,9 +4075,9 @@ class RecommendationEngine:
                 max_tokens=8192,
                 # v0.3.51+: expression generation is short copy
                 # writing per item — reasoning chain just bloats
-                # output (write_expression cost ~3x with reasoning
-                # vs without, no quality difference).
-                reasoning_effort="",
+                # output (write_expression cost ~3x with high reasoning
+                # vs low, no quality difference).
+                reasoning_effort="low",
                 caller="recommendation.write_expression",
                 **without_core_memory_kwargs(complete_structured),
             )

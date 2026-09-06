@@ -628,7 +628,7 @@ async def test_cold_start_multiple_platforms_one_merged_call(db: Database) -> No
     # Exactly one merged call, tagged with the planner caller.
     assert len(llm.calls) == 1
     assert llm.calls[0]["caller"] == "discovery.keyword_planner"
-    assert llm.calls[0]["reasoning_effort"] == ""
+    assert llm.calls[0]["reasoning_effort"] == "low"
     assert llm.calls[0]["inject_core_memory"] is False
     # The user prompt mentions all three due platforms but NOT the zero-deficit ones.
     user = llm.calls[0]["user"]

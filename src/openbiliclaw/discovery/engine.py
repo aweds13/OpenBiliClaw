@@ -3423,7 +3423,7 @@ class ContentDiscoveryEngine:
                     "user_input": messages[1]["content"],
                     "image_inputs": image_inputs,
                     "max_tokens": 4096,
-                    "reasoning_effort": "",
+                    "reasoning_effort": "low",
                     "caller": "discovery.evaluate_batch",
                 }
                 kwargs.update(without_core_memory_kwargs(multimodal_call))
@@ -3432,13 +3432,12 @@ class ContentDiscoveryEngine:
                 kwargs = {
                     "system_instruction": messages[0]["content"],
                     "user_input": messages[1]["content"],
-                    # v0.3.51+: explicitly disable provider thinking. This
-                    # task is structured scoring (return JSON array), not
-                    # reasoning — production logs showed 8-16 min/batch
-                    # with reasoning enabled, dropping to ~30s without.
-                    # 4096 max_tokens covers the observed 1500-3000 token
-                    # output of a 30-item JSON array without making providers
-                    # reserve an unnecessarily large per-request quota.
+                    # v0.3.51+: use the lowest portable reasoning effort.
+                    # This task is structured scoring (return JSON array), not
+                    # open-ended reasoning. Some reasoning-first
+                    # OpenAI-compatible models reject the empty string, so we
+                    # send "low" instead of "". 4096 max_tokens covers the
+                    # observed 1500-3000 token output of a 30-item JSON array.
                     "max_tokens": 4096,
                     "caller": "discovery.evaluate_batch",
                 }
@@ -3446,7 +3445,7 @@ class ContentDiscoveryEngine:
 
                 complete_structured = self._llm_service.complete_structured_task
                 if call_accepts_keyword(complete_structured, "reasoning_effort"):
-                    kwargs["reasoning_effort"] = ""
+                    kwargs["reasoning_effort"] = "low"
                 kwargs.update(without_core_memory_kwargs(complete_structured))
                 llm_call = complete_structured(**kwargs)
             if self._concurrency is not None:

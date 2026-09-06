@@ -648,7 +648,7 @@ class SearchStrategy(DiscoveryStrategy):
                 user_input=prompt_messages[1]["content"],
                 max_tokens=1024,
                 caller="discovery.search.queries",
-                reasoning_effort="",
+                reasoning_effort="low",
                 **without_core_memory_kwargs(complete_structured),
             )
             queries = self._parse_queries(str(getattr(response, "content", "")))

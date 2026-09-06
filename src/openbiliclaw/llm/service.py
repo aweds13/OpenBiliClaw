@@ -233,11 +233,14 @@ class LLMService:
         ("soul", "soul"),
     )
     # Channel-facing work is dominated by bounded JSON extraction, scoring,
-    # keyword generation, and short recommendation copy.  Letting these calls
-    # inherit a provider-wide DeepSeek thinking setting can spend the entire
-    # output budget before any final JSON is emitted.  Soul/profile work keeps
-    # the configured provider default; callers can always opt back in by
-    # explicitly passing ``high`` or ``max``.
+    # keyword generation, and short recommendation copy.  These calls should
+    # not inherit an unrestricted provider-wide reasoning setting that can
+    # spend the entire output budget before any final JSON is emitted.  Use
+    # the lowest portable effort the ecosystem understands instead of the
+    # empty string: several OpenAI-compatible reasoning-first models reject
+    # ``""`` with "does not support disabling thinking; use low/high/max".
+    # Soul/profile work keeps the configured provider default; callers can
+    # still opt in to ``high``/``max`` by passing it explicitly.
     _NO_REASONING_DEFAULT_PREFIXES: ClassVar[tuple[str, ...]] = (
         "discovery",
         "recommendation",
@@ -406,12 +409,12 @@ class LLMService:
             return requested
         tag = caller.strip()
         if tag in cls._NO_REASONING_DEFAULT_CALLERS:
-            return ""
+            return "low"
         if any(
             cls._caller_matches_route_prefix(tag, prefix)
             for prefix in cls._NO_REASONING_DEFAULT_PREFIXES
         ):
-            return ""
+            return "low"
         return None
 
     @staticmethod
@@ -497,7 +500,9 @@ class LLMService:
         thinking mode. ``""`` explicitly disables it. ``None`` keeps the
         provider default for Soul/profile work, while channel-facing discovery,
         recommendation, source extraction, and short evaluation callers default
-        to ``""``. An explicit ``"high"`` / ``"max"`` always wins.
+        to ``"low"`` (the lowest portable effort; some reasoning-first
+        OpenAI-compatible models reject the empty string). An explicit
+        ``"high"`` / ``"max"`` always wins.
 
         ``bypass_semaphore`` (legacy name) skips only background admission;
         every provider call still respects the runtime total gate.

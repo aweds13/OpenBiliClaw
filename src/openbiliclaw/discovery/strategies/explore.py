@@ -447,7 +447,7 @@ class ExploreStrategy(DiscoveryStrategy):
                 user_input=messages[1]["content"],
                 max_tokens=2048,
                 caller="discovery.explore.queries",
-                reasoning_effort="",
+                reasoning_effort="low",
                 **without_core_memory_kwargs(complete_structured),
             )
             parsed = json.loads(str(getattr(response, "content", "")).strip())

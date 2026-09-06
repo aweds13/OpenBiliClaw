@@ -259,7 +259,7 @@ class InspirationKeywordPipeline:
             system_instruction=messages[0]["content"],
             user_input=messages[1]["content"],
             caller="discovery.keyword_inspiration",
-            reasoning_effort="",
+            reasoning_effort="low",
             max_tokens=max_tokens,
             **without_core_memory_kwargs(complete_structured),
         )

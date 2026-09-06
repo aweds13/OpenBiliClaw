@@ -201,7 +201,7 @@ async def test_chunked_preference_analysis_disables_core_memory_injection() -> N
         PREFERENCE_CHUNK_MAX_TOKENS,
         PREFERENCE_CHUNK_MAX_TOKENS,
     ]
-    assert [call["reasoning_effort"] for call in service.calls] == ["", ""]
+    assert [call["reasoning_effort"] for call in service.calls] == ["low", "low"]
 
 
 @pytest.mark.asyncio
