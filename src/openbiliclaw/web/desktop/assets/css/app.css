@@ -464,6 +464,9 @@
        scroll shortcut above it so a long transcript never makes the floating
        control intercept the Send button. */
     body.chat-page-open .back-to-top { bottom: calc(max(22px, env(safe-area-inset-bottom, 0px)) + 76px); }
+    /* Settings has a sticky save bar at the viewport bottom. Lift the floating
+       scroll shortcut above it so the Save config button stays clickable. */
+    body.settings-page-open .back-to-top { bottom: calc(max(22px, env(safe-area-inset-bottom, 0px)) + 84px); }
     body.chat-page-open { overflow-y: hidden; }
     body.chat-page-open .layout { height: calc(100vh - var(--topbar-height)); padding-block: var(--space-6); overflow: hidden; }
     .main-col { min-width: 0; }

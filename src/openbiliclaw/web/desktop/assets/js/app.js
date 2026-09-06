@@ -3030,6 +3030,7 @@
       document.body.classList.toggle("profile-page-open", pageId === "profilePage");
       document.body.classList.toggle("chat-page-open", pageId === "chatPage");
       document.body.classList.toggle("content-page-open", pageId !== "homePage");
+      document.body.classList.toggle("settings-page-open", pageId === "settingsPage");
     }
 
     function syncTopbarHeight() {
