@@ -7,12 +7,13 @@ to be in the same process or on the same event loop.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -37,22 +38,19 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
             handle.flush()
-            os.fsync(handle.fileno())
         os.replace(temporary_path, path)
         if os.name != "nt":
             os.chmod(path, 0o600)
     finally:
-        try:
+        with contextlib.suppress(FileNotFoundError):
             temporary_path.unlink()
-        except FileNotFoundError:
-            pass
 
 
 def _timestamp_to_iso(value: float | None) -> str:
     if not value or value <= 0:
         return ""
     try:
-        return datetime.fromtimestamp(float(value), tz=timezone.utc).isoformat()
+        return datetime.fromtimestamp(float(value), tz=UTC).isoformat()
     except (OverflowError, OSError, ValueError):
         return ""
 

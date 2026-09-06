@@ -12,6 +12,7 @@ to pickle the API process's in-memory objects.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -87,15 +88,12 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
             handle.flush()
-            os.fsync(handle.fileno())
         os.replace(temporary_path, path)
         if os.name != "nt":
             os.chmod(path, 0o600)
     finally:
-        try:
+        with contextlib.suppress(FileNotFoundError):
             temporary_path.unlink()
-        except FileNotFoundError:
-            pass
 
 
 class ServeSnapshotStore:
