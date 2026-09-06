@@ -176,6 +176,7 @@ class SocraticDialogue:
         turn_id: str = "",
         session: str = "",
         dialogue_binding: DialogueTurnBinding | Mapping[str, object] | None = None,
+        progress: Any = None,
     ) -> str:
         """Generate a Socratic response to a user message.
 
@@ -234,7 +235,9 @@ class SocraticDialogue:
 
                 # If tools are configured, try tool-calling path first
                 if self._tools and self._tool_dispatcher:
-                    reply = await self._respond_with_tools(service, prompt_user_message)
+                    reply = await self._respond_with_tools(
+                        service, prompt_user_message, progress=progress
+                    )
                 else:
                     response = await service.complete_socratic_dialogue(
                         user_message=prompt_user_message,
@@ -320,7 +323,9 @@ class SocraticDialogue:
                     asyncio.create_task(_background_learn())
             return reply
 
-    async def _respond_with_tools(self, service: Any, user_message: str) -> str:
+    async def _respond_with_tools(
+        self, service: Any, user_message: str, progress: Any = None
+    ) -> str:
         """Attempt a tool-calling response, falling back to normal dialogue.
 
         The flow:
@@ -360,6 +365,14 @@ class SocraticDialogue:
         if response.tool_calls:
             tool_call = response.tool_calls[0]
             logger.info("Dialogue tool call: %s", tool_call.get("name"))
+            if progress is not None:
+                await progress(
+                    "tool_call",
+                    {
+                        "name": str(tool_call.get("name", "")),
+                        "arguments": tool_call.get("arguments", {}),
+                    },
+                )
             if self._tool_dispatcher is None:
                 return str(response.content)
             tool_result = self._tool_dispatcher.dispatch(tool_call)

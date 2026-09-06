@@ -10663,12 +10663,19 @@ def create_app(
         row = _get_chat_turn_row(turn_id) if turn_id else None
         turn = _normalize_chat_turn(row) if row else None
 
+        progress_events: list[tuple[str, dict[str, object]]] = []
+
+        async def _progress(event: str, data: dict[str, object]) -> None:
+            progress_events.append((event, data))
+
         async def _respond(dialogue_owner: Any) -> str:
             if turn is not None:
-                return await _generate_durable_chat_reply(turn, dialogue_owner)
+                return await _generate_durable_chat_reply(
+                    turn, dialogue_owner, progress=_progress
+                )
             return str(
                 await asyncio.wait_for(
-                    dialogue_owner.respond(message),
+                    dialogue_owner.respond(message, progress=_progress),
                     timeout=120,
                 )
             )
@@ -10689,6 +10696,8 @@ def create_app(
             if turn is not None and turn_id:
                 _complete_chat_turn_row(turn_id, reply=reply)
 
+            for event, data in progress_events:
+                yield sse(event, data)
             await asyncio.sleep(0.15)
             for i in range(0, len(reply), 18):
                 yield sse("content", {"delta": reply[i : i + 18]})
@@ -11230,7 +11239,9 @@ def create_app(
             },
         )
 
-    async def _generate_durable_chat_reply(turn: ChatTurnOut, dialogue_owner: Any) -> str:
+    async def _generate_durable_chat_reply(
+        turn: ChatTurnOut, dialogue_owner: Any, progress: Any = None
+    ) -> str:
         respond_kwargs: dict[str, object] = {
             "scope": turn.scope or "chat",
             "turn_id": turn.turn_id,
@@ -11245,6 +11256,8 @@ def create_app(
             respond_kwargs["session"] = turn.session
         if binding is not None and "dialogue_binding" in respond_parameters:
             respond_kwargs["dialogue_binding"] = binding
+        if progress is not None and "progress" in respond_parameters:
+            respond_kwargs["progress"] = progress
         reply = str(
             await asyncio.wait_for(
                 dialogue_owner.respond(
