@@ -139,6 +139,7 @@ from openbiliclaw.api.models import (
     ProfileSummaryResponse,
     ProjectStatsResponse,
     RecommendationAppendIn,
+    RecommendationAppendResponse,
     RecommendationClickIn,
     RecommendationClickResponse,
     RecommendationListResponse,
@@ -9746,7 +9747,7 @@ def create_app(
         )
         return RecommendationReshuffleResponse(items=_serialize_recommendation_items(items))
 
-    @app.post("/api/recommendations/append", response_model=RecommendationReshuffleResponse)
+    @app.post("/api/recommendations/append", response_model=RecommendationAppendResponse)
     async def append_recommendations(
         payload: RecommendationAppendIn,
     ) -> RecommendationReshuffleResponse:
@@ -9754,7 +9755,7 @@ def create_app(
         request_started = time.perf_counter()
         precheck_ms = 0.0
         if ctx.recommendation_engine is None or ctx.soul_engine is None:
-            return RecommendationReshuffleResponse(items=[])
+            return RecommendationAppendResponse(items=[], has_more=False)
         result_fn = getattr(
             ctx.recommendation_engine,
             "append_recommendations_with_result",
@@ -9764,13 +9765,13 @@ def create_app(
             precheck_started = time.perf_counter()
             if await asyncio.to_thread(_pool_available_count) == 0:
                 await _trigger_replenishment_if_needed(force=True)
-                return RecommendationReshuffleResponse(items=[])
+                return RecommendationAppendResponse(items=[], has_more=False)
             precheck_ms = (time.perf_counter() - precheck_started) * 1000.0
         profile_started = time.perf_counter()
         try:
             profile = await ctx.soul_engine.get_profile()
         except Exception:
-            return RecommendationReshuffleResponse(items=[])
+            return RecommendationAppendResponse(items=[], has_more=False)
         profile_ms = (time.perf_counter() - profile_started) * 1000.0
         scope_kwargs = _platform_scope_kwargs(payload.source_platform)
         if callable(result_fn):
@@ -9816,7 +9817,10 @@ def create_app(
             float(getattr(timings, "persist_ms", 0.0)),
             (time.perf_counter() - request_started) * 1000.0,
         )
-        return RecommendationReshuffleResponse(items=_serialize_recommendation_items(items))
+        return RecommendationAppendResponse(
+            items=_serialize_recommendation_items(items),
+            has_more=len(_serialize_recommendation_items(items)) >= 10,
+        )
 
     @app.post("/api/recommendations/refresh", response_model=RecommendationRefreshResponse)
     async def refresh_recommendations() -> RecommendationRefreshResponse:

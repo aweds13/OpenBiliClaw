@@ -7565,7 +7565,8 @@ class TestBackendAPI:
                     "published_at": "",
                     "published_label": "",
                 }
-            ]
+            ],
+            "has_more": False,
         }
         import time
 
@@ -7660,7 +7661,7 @@ class TestBackendAPI:
         assert reshuffle.status_code == 200
         assert reshuffle.json() == {"items": []}
         assert append.status_code == 200
-        assert append.json() == {"items": []}
+        assert append.json() == {"items": [], "has_more": False}
         assert soul.profile_calls == 0
         assert rec.calls == 0
         assert runtime.requests == [("pool_empty", True)]

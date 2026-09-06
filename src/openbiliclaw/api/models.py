@@ -337,6 +337,12 @@ class RecommendationReshuffleResponse(BaseModel):
     items: list[RecommendationOut]
 
 
+class RecommendationAppendResponse(RecommendationReshuffleResponse):
+    """Immediate append result with a ``has_more`` pagination hint."""
+
+    has_more: bool = True
+
+
 class _PlatformScopedRecommendationIn(BaseModel):
     """Shared exclusions plus the optional canonical platform scope.
 
