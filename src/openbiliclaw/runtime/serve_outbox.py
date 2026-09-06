@@ -12,9 +12,9 @@ queues are required.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -41,10 +41,13 @@ class ServeOutbox:
             "ranked_bvids": ranked_bvids,
         }
         payload = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
+        # Deliberately no os.fsync: a JSONL outbox is a fast handoff buffer, not
+        # a durable journal. fsync on macOS/SSDs can block the recommendation
+        # hot path for seconds on every append; the worker drains it shortly
+        # after with its own database transaction.
         with open(self.path, "a", encoding="utf-8") as handle:
             handle.write(payload)
             handle.flush()
-            os.fsync(handle.fileno())
 
     def read_all(self) -> list[dict[str, Any]]:
         """Return all complete JSONL records currently buffered."""
@@ -72,7 +75,5 @@ class ServeOutbox:
 
     def clear(self) -> None:
         """Remove the outbox after a successful drain."""
-        try:
+        with contextlib.suppress(FileNotFoundError):
             self.path.unlink()
-        except FileNotFoundError:
-            pass
