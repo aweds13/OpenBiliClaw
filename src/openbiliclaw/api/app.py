@@ -1873,6 +1873,13 @@ def _is_masked_proxy_echo(value: str) -> bool:
     return "***" in value
 
 
+# Simple in-memory TTL cache for Bilibili related-videos. The upstream B站
+# related API can take several seconds; warm entries make opening the playback
+# page snappy instead of blocking on every tap.
+_BILIBILI_RELATED_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+_BILIBILI_RELATED_CACHE_TTL_SECONDS = 300.0
+
+
 def create_app(
     *,
     memory_manager: Any | None = None,
@@ -7406,6 +7413,11 @@ def create_app(
 
     @app.get("/api/bilibili/video/related")
     async def bilibili_video_related(bvid: str = Query(...)) -> dict[str, Any]:
+        now = time.monotonic()
+        cached = _BILIBILI_RELATED_CACHE.get(bvid)
+        if cached is not None and now - cached[0] < _BILIBILI_RELATED_CACHE_TTL_SECONDS:
+            return {"ok": True, "items": cached[1]}
+
         from openbiliclaw.bilibili.api import BilibiliAPIClient
         from openbiliclaw.bilibili.auth import resolve_runtime_cookie
         from openbiliclaw.config import load_config
@@ -7420,9 +7432,11 @@ def create_app(
             proxy=(getattr(cfg.bilibili, "proxy", None) or None),
         )
         try:
-            return {"ok": True, "items": await client.get_related_videos(bvid)}
+            items = await client.get_related_videos(bvid)
         finally:
             await client.close()
+        _BILIBILI_RELATED_CACHE[bvid] = (time.monotonic(), list(items))
+        return {"ok": True, "items": items}
 
     @app.get("/api/bilibili/video/comments")
     async def bilibili_video_comments(
