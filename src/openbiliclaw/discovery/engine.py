@@ -3432,21 +3432,18 @@ class ContentDiscoveryEngine:
                 kwargs = {
                     "system_instruction": messages[0]["content"],
                     "user_input": messages[1]["content"],
-                    # v0.3.51+: use the lowest portable reasoning effort.
-                    # This task is structured scoring (return JSON array), not
-                    # open-ended reasoning. Some reasoning-first
-                    # OpenAI-compatible models reject the empty string, so we
-                    # send "low" instead of "". 8192 max_tokens leaves room
-                    # for reasoning-first models that emit a short thinking
-                    # segment plus the 1500-3000 token structured output.
-                    "max_tokens": 8192,
+                    # Structured scoring is a JSON-returning task, not open-ended
+                    # reasoning. Disable thinking where the adapter supports it and
+                    # give the structured output enough budget to avoid
+                    # "reasoning but no final content (finish_reason=length)".
+                    "max_tokens": 16384,
                     "caller": "discovery.evaluate_batch",
                 }
                 from openbiliclaw.llm.task_options import call_accepts_keyword
 
                 complete_structured = self._llm_service.complete_structured_task
                 if call_accepts_keyword(complete_structured, "reasoning_effort"):
-                    kwargs["reasoning_effort"] = None
+                    kwargs["reasoning_effort"] = ""
                 kwargs.update(without_core_memory_kwargs(complete_structured))
                 llm_call = complete_structured(**kwargs)
             if self._concurrency is not None:
