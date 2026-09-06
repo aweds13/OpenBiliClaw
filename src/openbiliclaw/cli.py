@@ -1138,6 +1138,7 @@ def _run_api_server(*, host: str = "127.0.0.1", port: int = 8420) -> None:
         # running; the child worker gets the same flag through the inherited
         # environment below.
         os.environ["OPENBILICLAW_FULL_WORKER"] = "1"
+        os.environ.setdefault("OPENBILICLAW_RECOMMENDATION_PORT", "8422")
 
     api_app = create_app()
     state = getattr(api_app, "state", None)
@@ -1166,6 +1167,7 @@ def _run_api_server(*, host: str = "127.0.0.1", port: int = 8420) -> None:
         api_host=host,
     )
     worker_process: Any | None = None
+    recommendation_process: Any | None = None
     image_service_process: Any | None = None
     try:
         if worker_requested:
@@ -1181,6 +1183,35 @@ def _run_api_server(*, host: str = "127.0.0.1", port: int = 8420) -> None:
                 "info",
                 "Worker 进程",
                 f"已启动独立 full worker pid={worker_process.pid}（OPENBILICLAW_WORKER=1）",
+            )
+
+            # Dedicated recommendation API process. The main API proxies
+            # /api/recommendations/* to this service so recommendation serving
+            # has its own event loop and does not compete with chat/status APIs.
+            import subprocess as _subprocess
+
+            recommendation_env = {
+                **os.environ,
+                "OPENBILICLAW_RECOMMENDATION_ONLY": "1",
+                "OPENBILICLAW_FULL_WORKER": "1",
+            }
+            recommendation_process = _subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "openbiliclaw.recommendation_server",
+                ],
+                cwd=os.getcwd(),
+                env=recommendation_env,
+            )
+            recommendation_port = os.environ.get(
+                "OPENBILICLAW_RECOMMENDATION_PORT", "8422"
+            )
+            _print_status_panel(
+                "info",
+                "Recommendation API 进程",
+                f"已启动独立推荐 API pid={recommendation_process.pid}"
+                f"（端口 {recommendation_port}）",
             )
 
         # Dedicated image proxy process: image fetching/compression lives here,
@@ -1221,6 +1252,12 @@ def _run_api_server(*, host: str = "127.0.0.1", port: int = 8420) -> None:
         finally:
             close_listener_sockets(listeners)
     finally:
+        if recommendation_process is not None:
+            recommendation_process.terminate()
+            try:
+                recommendation_process.wait(timeout=5)
+            except Exception:
+                recommendation_process.kill()
         if image_service_process is not None:
             image_service_process.terminate()
             try:

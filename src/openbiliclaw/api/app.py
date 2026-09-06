@@ -2818,6 +2818,56 @@ def create_app(
     # downstream handling. CORS stays inner; 401/403 echo a permissive header.
     app.middleware("http")(make_auth_middleware(_get_auth_gate))
 
+    if (
+        os.environ.get("OPENBILICLAW_RECOMMENDATION_ONLY", "").strip() != "1"
+        and os.environ.get("OPENBILICLAW_RECOMMENDATION_PORT", "").strip()
+    ):
+        import httpx as _httpx
+
+        @app.middleware("http")
+        async def proxy_recommendation_api(
+            request: Request, call_next: Any
+        ) -> Any:
+            if not request.url.path.startswith("/api/recommendations"):
+                return await call_next(request)
+            target_host = os.environ.get(
+                "OPENBILICLAW_RECOMMENDATION_HOST", "127.0.0.1"
+            )
+            target_port = os.environ.get("OPENBILICLAW_RECOMMENDATION_PORT", "8422")
+            target_url = f"http://{target_host}:{target_port}{request.url.path}"
+            if request.url.query:
+                target_url += f"?{request.url.query}"
+            headers = {
+                key: value
+                for key, value in request.headers.items()
+                if key.lower() not in {"host", "content-length", "connection"}
+            }
+            body = await request.body()
+            try:
+                async with _httpx.AsyncClient(timeout=60.0) as client:
+                    upstream = await client.request(
+                        request.method,
+                        target_url,
+                        headers=headers,
+                        content=body or None,
+                    )
+            except Exception as exc:
+                logger.exception("Recommendation proxy failed: %s", exc)
+                return JSONResponse(
+                    {"error": "recommendation_service_unavailable"},
+                    status_code=502,
+                )
+            response_headers = {
+                key: value
+                for key, value in upstream.headers.items()
+                if key.lower() not in {"content-encoding", "content-length", "transfer-encoding"}
+            }
+            return Response(
+                content=upstream.content,
+                status_code=upstream.status_code,
+                headers=response_headers,
+            )
+
     def _schedule_post_feedback_tasks() -> None:
         if (
             os.environ.get("OPENBILICLAW_FULL_WORKER", "").strip() == "1"
