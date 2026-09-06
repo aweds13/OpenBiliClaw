@@ -10096,7 +10096,6 @@ def create_app(
             item["id"] = str(item.get("id") or derived_id)
             item["notified"] = True
             found = True
-            break
         if not found:
             raise HTTPException(status_code=404, detail="Cognition update not found.")
         save_cognition_updates(updates)
