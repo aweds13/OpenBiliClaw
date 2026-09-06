@@ -505,6 +505,12 @@ class RecommendationEngine:
         self._bilibili_client = bilibili_client
         self._serve_snapshot_store = serve_snapshot_store
         self._serve_outbox = serve_outbox
+        # In-memory copy of the last worker-published snapshot. Reading a JSON
+        # snapshot from disk through asyncio.to_thread can queue behind busy
+        # background worker threads; serving from this cache keeps repeated
+        # 加载更多 / 换一批 responsive.
+        self._cached_serve_snapshot: Any | None = None
+        self._cached_serve_snapshot_at: float = 0.0
         # In-memory cache of the user's visual-profile centroids (pos/neg),
         # rebuilt in the background by rebuild_visual_profile(). serve() reads
         # this only — never triggers a rebuild or a cover fetch on the hot path.
@@ -789,9 +795,19 @@ class RecommendationEngine:
         if self._serve_snapshot_store is not None and expression_mode == "precomputed":
             # Phase 1: prefer the worker-published snapshot so serve does not
             # need to open a fresh SQLite read transaction on every refresh.
-            snapshot = await asyncio.to_thread(self._serve_snapshot_store.load)
-            if snapshot is not None:
-                logger.info("serve(%s) using worker-published snapshot", label)
+            now = time.monotonic()
+            if (
+                self._cached_serve_snapshot is not None
+                and now - self._cached_serve_snapshot_at < 3.0
+            ):
+                snapshot = self._cached_serve_snapshot
+                logger.info("serve(%s) using in-memory snapshot", label)
+            else:
+                snapshot = await asyncio.to_thread(self._serve_snapshot_store.load)
+                if snapshot is not None:
+                    self._cached_serve_snapshot = snapshot
+                    self._cached_serve_snapshot_at = time.monotonic()
+                    logger.info("serve(%s) using worker-published snapshot", label)
         if snapshot is not None:
             pool_readiness = dict(snapshot.readiness)
             candidates = self._enforce_platform_scope(
