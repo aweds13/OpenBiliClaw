@@ -511,6 +511,7 @@ class RecommendationEngine:
         # 加载更多 / 换一批 responsive.
         self._cached_serve_snapshot: Any | None = None
         self._cached_serve_snapshot_at: float = 0.0
+        self._snapshot_refresh_inflight = False
         # In-memory cache of the user's visual-profile centroids (pos/neg),
         # rebuilt in the background by rebuild_visual_profile(). serve() reads
         # this only — never triggers a rebuild or a cover fetch on the hot path.
@@ -718,6 +719,18 @@ class RecommendationEngine:
                 source_platform=source_platform,
             )
 
+    async def _refresh_serve_snapshot_cache(self) -> None:
+        """Reload the worker-published snapshot in the background."""
+        try:
+            fresh = await asyncio.to_thread(self._serve_snapshot_store.load)
+            if fresh is not None:
+                self._cached_serve_snapshot = fresh
+                self._cached_serve_snapshot_at = time.monotonic()
+        except Exception:
+            logger.exception("Background serve snapshot refresh failed")
+        finally:
+            self._snapshot_refresh_inflight = False
+
     def _enforce_platform_scope(
         self,
         candidates: list[DiscoveredContent],
@@ -796,12 +809,17 @@ class RecommendationEngine:
             # Phase 1: prefer the worker-published snapshot so serve does not
             # need to open a fresh SQLite read transaction on every refresh.
             now = time.monotonic()
-            if (
-                self._cached_serve_snapshot is not None
-                and now - self._cached_serve_snapshot_at < 3.0
-            ):
+            if self._cached_serve_snapshot is not None:
                 snapshot = self._cached_serve_snapshot
                 logger.info("serve(%s) using in-memory snapshot", label)
+                if (
+                    now - self._cached_serve_snapshot_at >= 3.0
+                    and not self._snapshot_refresh_inflight
+                ):
+                    # Keep serving from memory now, but refresh the cache in the
+                    # background so the next request sees a newer snapshot.
+                    self._snapshot_refresh_inflight = True
+                    asyncio.create_task(self._refresh_serve_snapshot_cache())
             else:
                 snapshot = await asyncio.to_thread(self._serve_snapshot_store.load)
                 if snapshot is not None:
