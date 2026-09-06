@@ -791,7 +791,7 @@ async def test_run_guided_init_emits_stage_progress_for_sources_and_chunks(monke
         (2, 3),
         (3, 3),
     ]
-    assert stage2[0]["note"] == "已完成 0/1 批 · AI 开始处理（并发上限 1）"
+    assert stage2[0]["note"] == "全平台共 1 条事件 · 已完成 0/1 批 · AI 开始处理（并发上限 1）"
     assert stage2[-1]["note"] == "第 3/3 批"
     assert stage2[0]["elapsed_seconds"] == 0
     assert all(call["max_seconds"] == 2700 for call in stage2)

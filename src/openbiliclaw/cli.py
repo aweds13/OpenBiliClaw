@@ -9739,7 +9739,7 @@ async def run_guided_init(
     # ── Stage 2: analyze preferences ──
     await _stage_started(2)
     _print_section_title("2/4 分析偏好")
-    console.print(f"  总信号量: [green]{len(events)}[/green] 条事件")
+    console.print(f"  全平台共 [green]{len(events)}[/green] 条事件")
     # Re-init with reset_cognition: retire the long-term awareness / insight
     # layers BEFORE this run's analysis so old LLM observations (e.g. from a
     # previous account) do not leak into the new profile build. This run's
@@ -9829,6 +9829,7 @@ async def run_guided_init(
         done=0,
         total=expected_chunk_total,
         note=(
+            f"全平台共 {len(events)} 条事件 · "
             f"已完成 0/{expected_chunk_total} 批 · "
             f"AI 开始处理（并发上限 {profile_analysis_concurrency}）"
         ),
