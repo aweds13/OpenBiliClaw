@@ -9528,6 +9528,14 @@ def create_app(
 
     def _schedule_exact_pool_status_snapshot() -> None:
         """Refresh exact counts after the HTTP response-critical work."""
+        # The worker process owns pool maintenance/status publishing in full
+        # mode; skipping this prevents WebSocket/DB work from delaying API
+        # responses on the same event loop.
+        if (
+            os.environ.get("OPENBILICLAW_FULL_WORKER", "").strip() == "1"
+            or os.environ.get("OPENBILICLAW_WORKER", "").strip() == "1"
+        ):
+            return
         task = asyncio.create_task(_publish_pool_status_snapshot())
         _fire_and_forget_tasks.add(task)
         task.add_done_callback(_fire_and_forget_tasks.discard)
