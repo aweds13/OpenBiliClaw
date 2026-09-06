@@ -3423,7 +3423,7 @@ class ContentDiscoveryEngine:
                     "user_input": messages[1]["content"],
                     "image_inputs": image_inputs,
                     "max_tokens": 4096,
-                    "reasoning_effort": "low",
+                    "reasoning_effort": None,
                     "caller": "discovery.evaluate_batch",
                 }
                 kwargs.update(without_core_memory_kwargs(multimodal_call))
@@ -3445,7 +3445,7 @@ class ContentDiscoveryEngine:
 
                 complete_structured = self._llm_service.complete_structured_task
                 if call_accepts_keyword(complete_structured, "reasoning_effort"):
-                    kwargs["reasoning_effort"] = "low"
+                    kwargs["reasoning_effort"] = None
                 kwargs.update(without_core_memory_kwargs(complete_structured))
                 llm_call = complete_structured(**kwargs)
             if self._concurrency is not None:

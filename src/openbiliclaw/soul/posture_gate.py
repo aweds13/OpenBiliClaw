@@ -265,7 +265,7 @@ class PostureGate:
                     user_input=messages[1]["content"],
                     max_tokens=max_tokens,
                     caller=_GATE_CALLER,
-                    reasoning_effort="low",
+                    reasoning_effort=None,
                     inject_core_memory=False,
                 )
                 break

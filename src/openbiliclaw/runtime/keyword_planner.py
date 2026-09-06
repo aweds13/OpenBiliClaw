@@ -1326,7 +1326,7 @@ class KeywordPlanner:
                         system_instruction=messages[0]["content"],
                         user_input=messages[1]["content"],
                         caller="discovery.keyword_planner",
-                        reasoning_effort="low",
+                        reasoning_effort=None,
                         max_tokens=merged_max_tokens,
                         **without_core_memory_kwargs(complete_structured),
                     )

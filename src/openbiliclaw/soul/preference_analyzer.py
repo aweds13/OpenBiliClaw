@@ -584,7 +584,7 @@ class PreferenceAnalyzer:
                         # provider reasoning can add thousands of invisible
                         # tokens, latency and TPM pressure without improving the
                         # schema. Final profile prose keeps provider defaults.
-                        reasoning_effort="low",
+                        reasoning_effort=None,
                     )
                     break
                 except (LLMProviderError, LLMServiceError) as exc:

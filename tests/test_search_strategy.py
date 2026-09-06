@@ -439,7 +439,7 @@ async def test_search_query_generation_uses_low_cost_structured_call() -> None:
     await strategy._generate_queries(_build_profile())
 
     assert llm_service.calls[0]["caller"] == "discovery.search.queries"
-    assert llm_service.calls[0]["reasoning_effort"] == "low"
+    assert llm_service.calls[0]["reasoning_effort"] is None
     assert llm_service.calls[0]["inject_core_memory"] is False
 
 

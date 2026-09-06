@@ -2189,7 +2189,7 @@ class RecommendationEngine:
             # v0.3.51+: structured XHS classification — pure score +
             # categorical fields, doesn't need deep reasoning; send low
             # portable effort because some models reject empty reasoning.
-            reasoning_effort="low",
+            reasoning_effort=None,
             caller="recommendation.evaluate_batch",
             **without_core_memory_kwargs(complete_structured),
         )
@@ -4077,7 +4077,7 @@ class RecommendationEngine:
                 # writing per item — reasoning chain just bloats
                 # output (write_expression cost ~3x with high reasoning
                 # vs low, no quality difference).
-                reasoning_effort="low",
+                reasoning_effort=None,
                 caller="recommendation.write_expression",
                 **without_core_memory_kwargs(complete_structured),
             )
