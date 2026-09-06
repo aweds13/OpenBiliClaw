@@ -733,6 +733,31 @@ class RecommendationEngine:
         finally:
             self._snapshot_refresh_inflight = False
 
+    @staticmethod
+    def _fast_diverse_rank(
+        candidates: list[DiscoveredContent],
+        limit: int,
+    ) -> list[DiscoveredContent]:
+        """Cheap platform round-robin selection for the fast append/reshuffle path."""
+        buckets: dict[str, list[DiscoveredContent]] = {}
+        for item in candidates:
+            key = str(getattr(item, "source_platform", "") or "other")
+            buckets.setdefault(key, []).append(item)
+        keys = list(buckets.keys())
+        ranked: list[DiscoveredContent] = []
+        while len(ranked) < limit:
+            progressed = False
+            for key in keys:
+                if len(ranked) >= limit:
+                    break
+                bucket = buckets[key]
+                if bucket:
+                    ranked.append(bucket.pop(0))
+                    progressed = True
+            if not progressed:
+                break
+        return ranked
+
     def _enforce_platform_scope(
         self,
         candidates: list[DiscoveredContent],
@@ -984,7 +1009,7 @@ class RecommendationEngine:
             )
 
         if fast_path and self._serve_outbox is not None and self._serve_snapshot_store is not None:
-            ranked = candidates[:limit]
+            ranked = self._fast_diverse_rank(candidates, limit)
             recommendations: list[Recommendation] = []
             for item in ranked:
                 rec = Recommendation(
@@ -4407,6 +4432,7 @@ class RecommendationEngine:
             excluded_bvids=excluded,
             expression_mode="precomputed",
             source_platform=source_platform,
+            fast_path=True,
         )
 
     async def append_recommendations(
@@ -4445,6 +4471,7 @@ class RecommendationEngine:
             excluded_bvids=excluded,
             expression_mode="precomputed",
             source_platform=source_platform,
+            fast_path=True,
         )
 
     async def generate_personal_topic(
