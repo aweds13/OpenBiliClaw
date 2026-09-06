@@ -146,6 +146,7 @@ import {
   fetchEditState,
   submitProfileEdit,
   startChatTurn,
+  streamChatTurn,
   submitFeedback,
   updateConfig,
   fetchSavedItems,
@@ -4288,6 +4289,7 @@ function expandDelightChat(itemEl, delight) {
         subjectId: delight.bvid,
         subjectTitle: delight.title || "",
         message,
+        streaming: true,
       });
       const ca = itemEl.querySelector(".message-chat-area");
       if (ca) ca.remove();
@@ -4449,6 +4451,7 @@ async function sendInlineChat(itemEl, domain, input, sendBtn, type = "interest.p
       subjectId: domain,
       subjectTitle: domain,
       message,
+      streaming: true,
     });
 
     // Completed turns remove the card after showing the reply. Failed turns
@@ -6151,6 +6154,41 @@ function pollChatTurnUntilSettled(turnId, { onUpdate, onDone } = {}) {
         await onDone?.(turn);
         return;
       }
+      if (turn.status === "pending" || turn.status === "processing") {
+        let accumulated = "";
+        try {
+          await streamChatTurn({
+            turnId: turn.turn_id,
+            message: turn.message || "",
+            session: turn.session || "popup",
+            scope: turn.scope || "chat",
+            subjectId: turn.subject_id || "",
+            subjectTitle: turn.subject_title || "",
+            replyToTurnId: turn.reply_to_turn_id || "",
+            onContent: (delta) => {
+              accumulated += delta;
+              onUpdate?.({ ...turn, reply: accumulated, status: "pending" });
+            },
+            onToolCall: (data) => {
+              accumulated += `\n\n🔧 调用工具：${String(data.name || "工具")}\n`;
+              onUpdate?.({ ...turn, reply: accumulated, status: "pending" });
+            },
+            onDone: (data) => {
+              const completed = {
+                ...turn,
+                reply: String(data.reply || accumulated),
+                status: "completed",
+              };
+              activeChatPolls.delete(turnId);
+              onUpdate?.(completed);
+              onDone?.(completed);
+            },
+          });
+          return;
+        } catch {
+          // SSE unavailable/failed; fall back to the classic polling path.
+        }
+      }
     } catch {
       // Keep polling until the deadline; reload recovery is best-effort
       // while the backend or network is temporarily unavailable.
@@ -6778,6 +6816,7 @@ function renderDelightSlot() {
               subjectId: delight.bvid,
               subjectTitle: delight.title || "",
               message: draft,
+              streaming: true,
             });
             applyTurnToDelight(turn);
             applyTurnToMessage(turn);
@@ -8018,6 +8057,7 @@ function bindChat() {
         scope: "chat",
         replyToTurnId,
         message,
+        streaming: true,
       });
       clearSlowStatusTimer();
       renderChatTurn(turn);

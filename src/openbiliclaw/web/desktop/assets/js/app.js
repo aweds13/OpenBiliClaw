@@ -25,6 +25,7 @@
       events: "/events",
       click: "/recommendation-click",
       chatTurns: "/chat/turns",
+      chatStream: "/chat/stream",
       dialogueContexts: "/chat/contexts",
       pendingConfirmations: "/chat/pending-confirmations",
       interestProbeRespond: "/interest-probes/respond",
@@ -6500,6 +6501,77 @@ ${cardFeedbackBarHtml()}`;
         : `我想多聊聊这个${isAvoidance ? "避雷" : "兴趣"}方向。`;
     }
 
+    async function streamChatTurn({
+      turnId,
+      message,
+      session = SHARED_CHAT_SESSION,
+      scope = "chat",
+      subjectId = "",
+      subjectTitle = "",
+      replyToTurnId = "",
+      onContent,
+      onToolCall,
+      onPhase,
+      onDone,
+      onError,
+    }) {
+      const base = getApiBase() || DEFAULT_API_BASE;
+      const response = await fetch(`${base}${ENDPOINTS.chatStream}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          turn_id: turnId,
+          session,
+          scope,
+          subject_id: subjectId,
+          subject_title: subjectTitle,
+          reply_to_turn_id: replyToTurnId,
+          message,
+        }),
+      });
+      if (!response.ok) throw new Error(`chat stream failed: ${response.status}`);
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let currentEvent = "";
+      let currentData = "";
+      const dispatch = () => {
+        if (!currentEvent || !currentData) return;
+        try {
+          const data = JSON.parse(currentData);
+          if (currentEvent === "content" && typeof onContent === "function") {
+            onContent(String(data.delta || ""));
+          } else if (currentEvent === "tool_call" && typeof onToolCall === "function") {
+            onToolCall(data);
+          } else if (currentEvent === "done" && typeof onDone === "function") {
+            onDone(data);
+          } else if (currentEvent === "phase" && typeof onPhase === "function") {
+            onPhase(data);
+          }
+        } catch {
+          // Ignore malformed SSE lines; keep the stream alive.
+        }
+        currentEvent = "";
+        currentData = "";
+      };
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || "";
+        for (const raw of lines) {
+          const line = raw.trim();
+          if (line.startsWith("event:")) {
+            currentEvent = line.slice(6).trim();
+          } else if (line.startsWith("data:")) {
+            currentData = line.slice(5).trim();
+            dispatch();
+          }
+        }
+      }
+    }
+
     async function pollInlineMessageChatTurn(turnId, chatArea, thinking, startedAt = Date.now()) {
       const showReply = (text, tone = "reply") => {
         thinking?.remove();
@@ -6573,11 +6645,47 @@ ${cardFeedbackBarHtml()}`;
               scope: isAvoidance ? "avoidance_probe" : "probe",
               subject_id: domain,
               subject_title: domain || (isAvoidance ? "这个避雷方向" : "这个兴趣方向"),
-              message: `${prompt}\n\n${message}`
+              message: `${prompt}\n\n${message}`,
+              streaming: true,
             })
           });
           if (input) input.value = "";
-          void pollInlineMessageChatTurn(turn?.turn_id || turnId, chatArea, thinking);
+          const turnIdForStream = turn?.turn_id || turnId;
+          let replyText = "";
+          const finishReply = (text, tone = "reply") => {
+            thinking?.remove();
+            appendInlineChatBubble(chatArea.querySelector(".inline-chat-turns"), tone, text);
+            chatArea.querySelectorAll(".inline-chat-input, .inline-chat-send, .inline-chat-cancel").forEach((control) => { control.disabled = false; });
+            input?.focus();
+          };
+          void streamChatTurn({
+            turnId: turnIdForStream,
+            message,
+            session: SHARED_CHAT_SESSION,
+            scope: isAvoidance ? "avoidance_probe" : "probe",
+            subjectId: domain,
+            subjectTitle: domain || (isAvoidance ? "这个避雷方向" : "这个兴趣方向"),
+            onContent: (delta) => {
+              replyText += delta;
+              if (thinking?.textContent !== undefined) thinking.textContent = replyText;
+            },
+            onToolCall: (data) => {
+              replyText += `\n\n🔧 调用工具：${String(data.name || "工具")}\n`;
+              if (thinking?.textContent !== undefined) thinking.textContent = replyText;
+            },
+            onDone: (data) => finishReply(String(data.reply || replyText)),
+            onError: (error) => {
+              thinking?.remove();
+              appendInlineChatBubble(chatArea.querySelector(".inline-chat-turns"), "error", error?.message || "后台正忙，等一下再聊。");
+              chatArea.querySelectorAll(".inline-chat-input, .inline-chat-send, .inline-chat-cancel").forEach((control) => { control.disabled = false; });
+              input?.focus();
+            },
+          }).catch((error) => {
+            thinking?.remove();
+            appendInlineChatBubble(chatArea.querySelector(".inline-chat-turns"), "error", error?.message || "后台正忙，等一下再聊。");
+            chatArea.querySelectorAll(".inline-chat-input, .inline-chat-send, .inline-chat-cancel").forEach((control) => { control.disabled = false; });
+            input?.focus();
+          });
         } catch (error) {
           thinking?.remove();
           appendInlineChatBubble(chatArea.querySelector(".inline-chat-turns"), "error", error?.message || "后台正忙，等一下再聊。");
@@ -7617,7 +7725,8 @@ ${cardFeedbackBarHtml()}`;
         subject_id: options.subjectId || "",
         subject_title: options.subjectTitle || "",
         reply_to_turn_id: replyToTurnId,
-        message: payloadMessage
+        message: payloadMessage,
+        streaming: true,
       };
       let turn;
       try {
@@ -7639,28 +7748,52 @@ ${cardFeedbackBarHtml()}`;
       }
       await refreshDialogueTurns().catch(() => {});
       void refreshDesktopPendingConfirmations().catch(() => {});
-      const startedAt = Date.now();
-      const poll = async () => {
-        const latest = await requestJson(`${ENDPOINTS.chatTurns}/${encodeURIComponent(turn.turn_id)}`);
-        if (latest?.status === "failed" || Date.now() - startedAt > 180000) {
-          if (latest?.status === "failed") await refreshDialogueTurns().catch(() => {});
-          else {
-            state.chat.push({ role: "agent", text: "聊天处理超时，稍后可以在历史里继续查看。" });
-            renderChat();
-          }
-          return;
-        }
-        if (latest?.status === "completed" || latest?.reply) {
-          await refreshDialogueConfirmationSurface();
-          // 回复完成 ≠ 结算完成：锚归属（support/contradict/revise/answer）是在回复
-          // 之后由结算 worker 落库的，所以此刻卡片往往还停在 discussing。不补这一步，
-          // 用户说完「我认可修正版」后卡片会一直显示「正在聊这条」，直到手动刷新。
-          await refreshUntilDialogueCardsSettle();
-          return;
-        }
-        window.setTimeout(poll, 1200);
+      const thinkingIndex = state.chat.length - 1;
+      let accumulated = "";
+      const finish = async (text) => {
+        state.chat[thinkingIndex] = { role: "agent", text: text };
+        renderChat({ forceBottom: true });
+        await refreshDialogueConfirmationSurface();
+        // 回复完成 ≠ 结算完成：锚归属（support/contradict/revise/answer）是在回复
+        // 之后由结算 worker 落库的，所以此刻卡片往往还停在 discussing。不补这一步，
+        // 用户说完「我认可修正版」后卡片会一直显示「正在聊这条」，直到手动刷新。
+        await refreshUntilDialogueCardsSettle();
       };
-      window.setTimeout(poll, 1200);
+      try {
+        await streamChatTurn({
+          turnId: turn.turn_id,
+          message: payloadMessage,
+          session: SHARED_CHAT_SESSION,
+          scope: options.scope || "chat",
+          subjectId: options.subjectId || "",
+          subjectTitle: options.subjectTitle || "",
+          replyToTurnId,
+          onContent: (delta) => {
+            accumulated += delta;
+            state.chat[thinkingIndex] = { role: "agent", text: accumulated };
+            renderChat({ forceBottom: true });
+          },
+          onToolCall: (data) => {
+            accumulated += `\n\n🔧 调用工具：${String(data.name || "工具")}\n`;
+            state.chat[thinkingIndex] = { role: "agent", text: accumulated };
+            renderChat({ forceBottom: true });
+          },
+          onDone: (data) => {
+            accumulated = String(data.reply || accumulated);
+            void finish(accumulated);
+          },
+        });
+        if (state.chat[thinkingIndex]?.thinking) {
+          await finish(accumulated || "后端已完成这轮聊天。");
+        }
+      } catch (error) {
+        state.chat[thinkingIndex] = {
+          role: "agent",
+          text: "聊天已提交，但流式连接中断，稍后会从历史自动恢复。",
+        };
+        renderChat();
+        void refreshDialogueTurns().catch(() => {});
+      }
     }
 
     async function refreshRecommendations() {

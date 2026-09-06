@@ -779,6 +779,7 @@ export async function startChatTurn({
   subjectId = "",
   subjectTitle = "",
   replyToTurnId = "",
+  streaming = false,
   message,
 }) {
   const payload = {
@@ -788,6 +789,7 @@ export async function startChatTurn({
     subject_id: subjectId,
     subject_title: subjectTitle,
     message,
+    streaming,
   };
   if (replyToTurnId) payload.reply_to_turn_id = replyToTurnId;
   return requestJson("/chat/turns", {
@@ -795,6 +797,78 @@ export async function startChatTurn({
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+export async function streamChatTurn({
+  turnId = "",
+  message = "",
+  session = "popup",
+  scope = "chat",
+  subjectId = "",
+  subjectTitle = "",
+  replyToTurnId = "",
+  onPhase,
+  onToolCall,
+  onContent,
+  onDone,
+} = {}) {
+  const backendUrl = await getBackendBaseUrl();
+  const response = await globalThis.fetch(`${backendUrl}/chat/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      turn_id: turnId,
+      session,
+      scope,
+      subject_id: subjectId,
+      subject_title: subjectTitle,
+      reply_to_turn_id: replyToTurnId,
+      message,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`chat stream failed: ${response.status}`);
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let currentEvent = "";
+  let currentData = "";
+  const dispatch = () => {
+    if (!currentEvent || !currentData) return;
+    try {
+      const data = JSON.parse(currentData);
+      if (currentEvent === "content" && typeof onContent === "function") {
+        onContent(String(data.delta || ""));
+      } else if (currentEvent === "tool_call" && typeof onToolCall === "function") {
+        onToolCall(data);
+      } else if (currentEvent === "done" && typeof onDone === "function") {
+        onDone(data);
+      } else if (currentEvent === "phase" && typeof onPhase === "function") {
+        onPhase(data);
+      }
+    } catch {
+      // Ignore malformed SSE lines; keep the stream alive.
+    }
+    currentEvent = "";
+    currentData = "";
+  };
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() || "";
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (line.startsWith("event:")) {
+        currentEvent = line.slice(6).trim();
+      } else if (line.startsWith("data:")) {
+        currentData = line.slice(5).trim();
+        dispatch();
+      }
+    }
+  }
 }
 
 export async function fetchChatTurn(turnId, { signal, timeoutMs = 10_000 } = {}) {
