@@ -2820,7 +2820,7 @@ def create_app(
 
     if (
         os.environ.get("OPENBILICLAW_RECOMMENDATION_ONLY", "").strip() != "1"
-        and os.environ.get("OPENBILICLAW_RECOMMENDATION_PORT", "").strip()
+        and os.environ.get("OPENBILICLAW_RECOMMENDATION_SOCK", "").strip()
     ):
         import httpx as _httpx
 
@@ -2830,11 +2830,7 @@ def create_app(
         ) -> Any:
             if not request.url.path.startswith("/api/recommendations"):
                 return await call_next(request)
-            target_host = os.environ.get(
-                "OPENBILICLAW_RECOMMENDATION_HOST", "127.0.0.1"
-            )
-            target_port = os.environ.get("OPENBILICLAW_RECOMMENDATION_PORT", "8422")
-            target_url = f"http://{target_host}:{target_port}{request.url.path}"
+            target_url = request.url.path
             if request.url.query:
                 target_url += f"?{request.url.query}"
             headers = {
@@ -2843,8 +2839,13 @@ def create_app(
                 if key.lower() not in {"host", "content-length", "connection"}
             }
             body = await request.body()
+            transport = _httpx.AsyncHTTPTransport(
+                uds=os.environ["OPENBILICLAW_RECOMMENDATION_SOCK"]
+            )
             try:
-                async with _httpx.AsyncClient(timeout=60.0) as client:
+                async with _httpx.AsyncClient(
+                    transport=transport, timeout=60.0
+                ) as client:
                     upstream = await client.request(
                         request.method,
                         target_url,

@@ -1138,7 +1138,13 @@ def _run_api_server(*, host: str = "127.0.0.1", port: int = 8420) -> None:
         # running; the child worker gets the same flag through the inherited
         # environment below.
         os.environ["OPENBILICLAW_FULL_WORKER"] = "1"
-        os.environ.setdefault("OPENBILICLAW_RECOMMENDATION_PORT", "8422")
+        recommendation_sock = (
+            load_config().data_path / "runtime" / "recommendation.sock"
+        )
+        os.environ.setdefault(
+            "OPENBILICLAW_RECOMMENDATION_SOCK",
+            str(recommendation_sock),
+        )
 
     api_app = create_app()
     state = getattr(api_app, "state", None)
@@ -1204,14 +1210,15 @@ def _run_api_server(*, host: str = "127.0.0.1", port: int = 8420) -> None:
                 cwd=os.getcwd(),
                 env=recommendation_env,
             )
-            recommendation_port = os.environ.get(
-                "OPENBILICLAW_RECOMMENDATION_PORT", "8422"
+            recommendation_sock = os.environ.get(
+                "OPENBILICLAW_RECOMMENDATION_SOCK",
+                "recommendation.sock",
             )
             _print_status_panel(
                 "info",
                 "Recommendation API 进程",
                 f"已启动独立推荐 API pid={recommendation_process.pid}"
-                f"（端口 {recommendation_port}）",
+                f"（Unix socket {recommendation_sock}）",
             )
 
         # Dedicated image proxy process: image fetching/compression lives here,
