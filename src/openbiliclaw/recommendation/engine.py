@@ -849,7 +849,11 @@ class RecommendationEngine:
                 candidates = self._exclude_disliked_topic_candidates_for_serve(candidates, profile)
                 after_disliked_count = len(candidates)
                 if snapshot.seen_bvids:
-                    candidates = [item for item in candidates if item.bvid not in snapshot.seen_bvids]
+                    candidates = [
+                        item
+                        for item in candidates
+                        if item.bvid not in snapshot.seen_bvids
+                    ]
                 after_viewed_count = len(candidates)
                 candidates = self._filter_candidates_for_publication_serving(candidates)
                 curator_snapshot = (
@@ -977,6 +981,11 @@ class RecommendationEngine:
                     ensure_ascii=False,
                 ),
             )
+        # Worker snapshots can contain several hundred pool rows. The expensive
+        # MMR/diversity selector only needs the top candidate_limit rows that
+        # the request actually wanted; capping here keeps "换一批" snappy.
+        if len(candidates) > candidate_limit:
+            candidates = candidates[:candidate_limit]
 
         score_override, amplification_guard = await asyncio.to_thread(
             self._score_candidates_with_curator,
