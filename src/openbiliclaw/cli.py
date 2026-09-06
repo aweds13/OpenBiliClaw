@@ -1166,6 +1166,7 @@ def _run_api_server(*, host: str = "127.0.0.1", port: int = 8420) -> None:
         api_host=host,
     )
     worker_process: Any | None = None
+    discovery_worker_process: Any | None = None
     image_service_process: Any | None = None
     try:
         if worker_requested:
@@ -1183,6 +1184,32 @@ def _run_api_server(*, host: str = "127.0.0.1", port: int = 8420) -> None:
                 f"已启动独立 full worker pid={worker_process.pid}（OPENBILICLAW_WORKER=1）",
             )
 
+
+
+            # Dedicated discovery runtime worker: runs the same
+            # ContinuousRefreshController as the API used to, but in a separate
+            # process so HTTP endpoints never compete with discovery/eval.
+            import subprocess as _subprocess
+
+            discovery_env = {
+                **os.environ,
+                "OPENBILICLAW_DISCOVERY_WORKER": "1",
+                "OPENBILICLAW_FULL_WORKER": "1",
+            }
+            discovery_worker_process = _subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "openbiliclaw.discovery_worker",
+                ],
+                cwd=os.getcwd(),
+                env=discovery_env,
+            )
+            _print_status_panel(
+                "info",
+                "Discovery Worker 进程",
+                f"已启动独立 discovery worker pid={discovery_worker_process.pid}",
+            )
 
         # Dedicated image proxy process: image fetching/compression lives here,
         # so it cannot squeeze recommendation serving / reshuffle / chat APIs.
@@ -1222,6 +1249,12 @@ def _run_api_server(*, host: str = "127.0.0.1", port: int = 8420) -> None:
         finally:
             close_listener_sockets(listeners)
     finally:
+        if discovery_worker_process is not None:
+            discovery_worker_process.terminate()
+            try:
+                discovery_worker_process.wait(timeout=5)
+            except Exception:
+                discovery_worker_process.kill()
         if image_service_process is not None:
             image_service_process.terminate()
             try:

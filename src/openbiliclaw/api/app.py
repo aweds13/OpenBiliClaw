@@ -9528,6 +9528,11 @@ def create_app(
 
     def _schedule_exact_pool_status_snapshot() -> None:
         """Refresh exact counts after the HTTP response-critical work."""
+        if (
+            os.environ.get("OPENBILICLAW_FULL_WORKER", "").strip() == "1"
+            or os.environ.get("OPENBILICLAW_WORKER", "").strip() == "1"
+        ):
+            return
         task = asyncio.create_task(_publish_pool_status_snapshot())
         _fire_and_forget_tasks.add(task)
         task.add_done_callback(_fire_and_forget_tasks.discard)
@@ -9590,6 +9595,13 @@ def create_app(
         available_count: int | None = None,
     ) -> None:
         """Fire a background Discovery refresh when the pool runs low."""
+        # The dedicated discovery worker owns replenishment. Skipping here keeps
+        # heavy discovery/eval work out of the API event loop.
+        if (
+            os.environ.get("OPENBILICLAW_FULL_WORKER", "").strip() == "1"
+            or os.environ.get("OPENBILICLAW_WORKER", "").strip() == "1"
+        ):
+            return
         if not force:
             curator = getattr(ctx.recommendation_engine, "_curator", None)
             if curator is None or not hasattr(curator, "needs_replenishment"):
