@@ -10647,6 +10647,54 @@ def create_app(
             reply = safe_llm_failure_message(exc)
         return JSONResponse(content={"reply": reply})
 
+    @app.post("/api/chat/stream")
+    async def chat_stream(payload: ChatIn) -> StreamingResponse:
+        """SSE chat endpoint for streamed content display.
+
+        First pass: streams a thinking heartbeat then final reply deltas.
+        Provider-level true thinking/tool-call streaming will build on this
+        same event contract.
+        """
+        message = payload.message.strip()
+        if not message:
+            raise HTTPException(status_code=422, detail="Chat message is required.")
+
+        async def _legacy_reply(dialogue_owner: Any) -> str:
+            return str(
+                await asyncio.wait_for(
+                    dialogue_owner.respond(message),
+                    timeout=120,
+                )
+            )
+
+        async def _event_stream():
+            import json as _json
+
+            def sse(event: str, data: dict) -> str:
+                return f"event: {event}\ndata: {_json.dumps(data, ensure_ascii=False)}\n\n"
+
+            yield sse("phase", {"phase": "thinking", "text": "正在思考…"})
+            try:
+                reply = await _run_with_dialogue_execution(_legacy_reply)
+            except Exception as exc:
+                logger.exception("Chat stream dialogue failed")
+                reply = safe_llm_failure_message(exc)
+
+            await asyncio.sleep(0.15)
+            for i in range(0, len(reply), 18):
+                yield sse("content", {"delta": reply[i : i + 18]})
+                await asyncio.sleep(0.015)
+            yield sse("done", {"reply": reply})
+
+        return StreamingResponse(
+            _event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     def _record_probe_cognition(
         summary: str,
         domain: str,
