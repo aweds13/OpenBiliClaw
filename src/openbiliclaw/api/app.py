@@ -6697,7 +6697,8 @@ def create_app(
                 host,
                 cache_id,
             )
-        proxy_data, proxy_content_type = _resize_cover_for_mobile(
+        proxy_data, proxy_content_type = await asyncio.to_thread(
+            _resize_cover_for_mobile,
             result.data,
             result.content_type,
         )
