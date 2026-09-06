@@ -9758,12 +9758,7 @@ async def run_guided_init(
     if llm_concurrency is None:
         profile_analysis_concurrency = _profile_analysis_concurrency(soul_engine)
     else:
-        from openbiliclaw.config import _MAX_LLM_CONCURRENCY
-
-        profile_analysis_concurrency = max(
-            1,
-            min(_MAX_LLM_CONCURRENCY, int(llm_concurrency)),
-        )
+        profile_analysis_concurrency = max(1, int(llm_concurrency))
     # Progress-aware deadline: the idle limit is what actually catches a wedged
     # gateway, so the absolute ceiling can stay generous for slow-but-healthy
     # ones. ``profile_analysis_budget`` remains the number published to the GUI

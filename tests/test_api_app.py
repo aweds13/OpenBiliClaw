@@ -16885,7 +16885,7 @@ class TestGuidedInitEndpoints:
 
         app, db = self._make_app(tmp_path)
         with TestClient(app) as client:
-            for bad in (0, 17, "not-an-int"):
+            for bad in (0, "not-an-int"):
                 resp = client.post(
                     "/api/init",
                     json={"sources": ["xiaohongshu"], "llm_concurrency": bad},

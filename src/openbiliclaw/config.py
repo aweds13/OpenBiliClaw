@@ -190,7 +190,6 @@ _DEFAULT_DANMAKU_FETCH_LIMIT = 50
 _DEFAULT_DANMAKU_MAX_CHARS = 500
 DEFAULT_LLM_CONCURRENCY = 3
 _MIN_LLM_CONCURRENCY = 1
-_MAX_LLM_CONCURRENCY = 16
 # Slow reasoning / OpenAI-compatible relays can legitimately take well over
 # five minutes for one long response; 20 minutes is the product request ceiling.
 _DEFAULT_LLM_TIMEOUT = 1200
@@ -3748,7 +3747,7 @@ def _normalize_llm_concurrency(value: object) -> int:
     else:
         return DEFAULT_LLM_CONCURRENCY
 
-    if not (_MIN_LLM_CONCURRENCY <= normalized <= _MAX_LLM_CONCURRENCY):
+    if normalized < _MIN_LLM_CONCURRENCY:
         return DEFAULT_LLM_CONCURRENCY
     return normalized
 

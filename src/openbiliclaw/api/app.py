@@ -5615,15 +5615,15 @@ def create_app(
                 return JSONResponse(
                     {
                         "error": "invalid_llm_concurrency",
-                        "detail": "llm_concurrency 必须是 1-16 的整数",
+                        "detail": "llm_concurrency 必须是正整数",
                     },
                     status_code=400,
                 )
-            if not (1 <= llm_concurrency <= 16):
+            if llm_concurrency < 1:
                 return JSONResponse(
                     {
                         "error": "invalid_llm_concurrency",
-                        "detail": "llm_concurrency 必须是 1-16 的整数",
+                        "detail": "llm_concurrency 必须是正整数",
                     },
                     status_code=400,
                 )
