@@ -708,6 +708,7 @@ class RecommendationEngine:
         excluded_bvids: frozenset[str] = frozenset(),
         expression_mode: Literal["realtime", "precomputed"] = "precomputed",
         source_platform: str = "",
+        fast_path: bool = False,
     ) -> ServeResult:
         """Serve one serialized batch with inventory/timing metadata."""
         async with self._serve_lock:
@@ -717,6 +718,7 @@ class RecommendationEngine:
                 excluded_bvids=excluded_bvids,
                 expression_mode=expression_mode,
                 source_platform=source_platform,
+                fast_path=fast_path,
             )
 
     async def _refresh_serve_snapshot_cache(self) -> None:
@@ -780,6 +782,7 @@ class RecommendationEngine:
         excluded_bvids: frozenset[str],
         expression_mode: Literal["realtime", "precomputed"],
         source_platform: str = "",
+        fast_path: bool = False,
     ) -> ServeResult:
         """Unified recommendation entry point — always picks from the pool.
 
@@ -978,6 +981,62 @@ class RecommendationEngine:
                 items=[],
                 pool_counts_after=pool_readiness,
                 timings=ServeTimings(pool_snapshot_ms=pool_snapshot_ms),
+            )
+
+        if fast_path and self._serve_outbox is not None and self._serve_snapshot_store is not None:
+            ranked = candidates[:limit]
+            recommendations: list[Recommendation] = []
+            for item in ranked:
+                rec = Recommendation(
+                    content=item,
+                    confidence=item.relevance_score,
+                    presented=False,
+                )
+                rec.expression = item.pool_expression.strip()
+                rec.topic_label = item.pool_topic_label.strip()
+                recommendations.append(rec)
+            recommendation_rows = [
+                {
+                    "bvid": rec.content.bvid,
+                    "item_key": rec.content.item_key,
+                    "expression": rec.expression,
+                    "topic": rec.topic_label,
+                    "confidence": rec.confidence,
+                    "presented": 0,
+                }
+                for rec in recommendations
+            ]
+            ranked_bvids = [item.bvid for item in ranked]
+            await asyncio.to_thread(
+                self._serve_outbox.append,
+                recommendation_rows,
+                ranked_bvids,
+            )
+            self._last_served_bvids = frozenset(item.bvid for item in ranked if item.bvid)
+            consumed = len(recommendations)
+            pool_counts_after = {
+                key: max(0, int(value)) for key, value in pool_readiness.items()
+            }
+            for key in ("available", "copy_ready", "raw"):
+                if key in pool_counts_after:
+                    pool_counts_after[key] = max(0, pool_counts_after[key] - consumed)
+            if hasattr(self, "_schedule_pool_inventory_commit"):
+                self._schedule_pool_inventory_commit(pool_counts_after)
+            logger.info(
+                "serve(%s) fast path served %d item(s)",
+                label,
+                len(recommendations),
+            )
+            return ServeResult(
+                items=recommendations,
+                pool_counts_after=pool_counts_after,
+                timings=ServeTimings(
+                    pool_snapshot_ms=pool_snapshot_ms,
+                    embedding_ms=0.0,
+                    selector_worker_ms=0.0,
+                    event_loop_resume_delay_ms=0.0,
+                    persist_ms=0.0,
+                ),
             )
 
         # Online supergroup merging — collapses semantically-equivalent
@@ -4342,6 +4401,7 @@ class RecommendationEngine:
             excluded_bvids=excluded,
             expression_mode="precomputed",
             source_platform=source_platform,
+            fast_path=True,
         )
 
     async def append_recommendations(
@@ -4380,6 +4440,7 @@ class RecommendationEngine:
             excluded_bvids=excluded,
             expression_mode="precomputed",
             source_platform=source_platform,
+            fast_path=True,
         )
 
     async def generate_personal_topic(
