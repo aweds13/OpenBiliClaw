@@ -1890,6 +1890,14 @@ class RuntimeContext:
                         "Stale %s exited with an error during hot-reload", attr, exc_info=True
                     )
 
+        # A full background worker process already runs the discovery/refresh
+        # loops. Starting the API-side runtime_controller too would make these
+        # heavy CPU tasks compete with recommendation serving on this host.
+        full_worker_active = (
+            os.environ.get("OPENBILICLAW_FULL_WORKER", "").strip() == "1"
+            or os.environ.get("OPENBILICLAW_WORKER", "").strip() == "1"
+        )
+
         # Start new tasks from the freshly-built components.
         # v0.3.63+: route through ``self.task_registry.track`` so the
         # next hot-reload's ``cancel_all`` cleanly stops them too.
@@ -1897,7 +1905,7 @@ class RuntimeContext:
         # controller here would start every discovery loop, not only the
         # extension-account scheduler. The normal post-init restart owns the
         # one replacement controller and its independent source loop.
-        if run_post_reload_llm_work:
+        if run_post_reload_llm_work and not full_worker_active:
             run_forever = getattr(self.runtime_controller, "run_forever", None)
             if "refresh_task" not in stuck_tasks:
                 app.state.refresh_task = (
