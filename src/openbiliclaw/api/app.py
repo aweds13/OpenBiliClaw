@@ -2830,7 +2830,7 @@ def create_app(
         ) -> Any:
             if not request.url.path.startswith("/api/recommendations"):
                 return await call_next(request)
-            target_url = request.url.path
+            target_url = f"http://localhost{request.url.path}"
             if request.url.query:
                 target_url += f"?{request.url.query}"
             headers = {
