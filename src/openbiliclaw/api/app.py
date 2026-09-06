@@ -7534,9 +7534,24 @@ def create_app(
                 str(getattr(content, "content_url", "") or ""),
             )
 
+        def resolved_id_for(item: Any) -> int:
+            existing = int(item.recommendation_id)
+            if existing > 0:
+                return existing
+            # Serve/append results may not carry the DB row id; resolve by the
+            # stable content identity so appended cards can still be fed back.
+            try:
+                row = ctx.database.get_recommendation_by_identity(
+                    bvid=str(item.content.bvid or ""),
+                    item_key=item_key_for(item.content),
+                )
+            except Exception:
+                row = None
+            return int(row.get("id", 0)) if row else 0
+
         return [
             RecommendationOut(
-                id=int(item.recommendation_id),
+                id=resolved_id_for(item),
                 bvid=str(item.content.bvid),
                 item_key=item_key_for(item.content),
                 title=str(item.content.title),
