@@ -10648,18 +10648,24 @@ def create_app(
         return JSONResponse(content={"reply": reply})
 
     @app.post("/api/chat/stream")
-    async def chat_stream(payload: ChatIn) -> StreamingResponse:
+    async def chat_stream(payload: ChatTurnIn) -> StreamingResponse:
         """SSE chat endpoint for streamed content display.
 
-        First pass: streams a thinking heartbeat then final reply deltas.
-        Provider-level true thinking/tool-call streaming will build on this
-        same event contract.
+        When a ``turn_id`` is supplied, the client has already created a
+        pending durable turn with ``streaming=True``; this endpoint completes
+        that turn while streaming deltas. Without a turn_id it falls back to a
+        non-persistent legacy response.
         """
         message = payload.message.strip()
         if not message:
             raise HTTPException(status_code=422, detail="Chat message is required.")
+        turn_id = payload.turn_id.strip()
+        row = _get_chat_turn_row(turn_id) if turn_id else None
+        turn = _normalize_chat_turn(row) if row else None
 
-        async def _legacy_reply(dialogue_owner: Any) -> str:
+        async def _respond(dialogue_owner: Any) -> str:
+            if turn is not None:
+                return await _generate_durable_chat_reply(turn, dialogue_owner)
             return str(
                 await asyncio.wait_for(
                     dialogue_owner.respond(message),
@@ -10675,10 +10681,13 @@ def create_app(
 
             yield sse("phase", {"phase": "thinking", "text": "正在思考…"})
             try:
-                reply = await _run_with_dialogue_execution(_legacy_reply)
+                reply = await _run_with_dialogue_execution(_respond)
             except Exception as exc:
                 logger.exception("Chat stream dialogue failed")
                 reply = safe_llm_failure_message(exc)
+
+            if turn is not None and turn_id:
+                _complete_chat_turn_row(turn_id, reply=reply)
 
             await asyncio.sleep(0.15)
             for i in range(0, len(reply), 18):
@@ -12122,7 +12131,7 @@ def create_app(
                     "This turn id already belongs to a different request.",
                 )
             turn = _normalize_chat_turn(existing)
-            if turn.status == "pending":
+            if turn.status == "pending" and not payload.streaming:
                 chat_reply_scheduler.schedule(turn.turn_id)
             return turn
 
@@ -12212,7 +12221,8 @@ def create_app(
             turn_id=turn_id,
             structured_payload=structured_payload,
         )
-        chat_reply_scheduler.schedule(turn_id)
+        if not payload.streaming:
+            chat_reply_scheduler.schedule(turn_id)
         return _normalize_chat_turn(row)
 
     @app.get("/api/chat/pending-confirmations", response_model=None)

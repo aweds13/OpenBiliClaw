@@ -1971,6 +1971,9 @@ class ChatTurnIn(BaseModel):
     # are resolved from this durable target by the server at POST time.
     reply_to_turn_id: str = ""
     payload: dict[str, object] = Field(default_factory=dict)
+    # When true, the client will consume /api/chat/stream for the reply and the
+    # background scheduler must not also generate a duplicate reply.
+    streaming: bool = False
 
     @model_validator(mode="after")
     def reject_reserved_binding_payload(self) -> Self:
