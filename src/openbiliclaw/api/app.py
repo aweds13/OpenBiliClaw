@@ -6632,6 +6632,35 @@ def create_app(
             return JSONResponse({"error": "not_running"}, status_code=409)
         return JSONResponse({"cancelling": True, "run_id": run["run_id"]}, status_code=202)
 
+    def _resize_cover_for_mobile(
+        data: bytes,
+        content_type: str,
+    ) -> tuple[bytes, str]:
+        """Downscale/compress proxied cover images for mobile bandwidth.
+
+        Original CDN covers are often 300KB-500KB; mobile only renders them at
+        card/list size. A 640px JPEG keeps quality while cutting transfer size
+        dramatically. Failures fall back to the original bytes.
+        """
+        if not data or 'image' not in content_type:
+            return data, content_type
+        try:
+            from io import BytesIO
+
+            from PIL import Image
+
+            image = Image.open(BytesIO(data))
+            if image.width <= 640:
+                return data, content_type
+            image.thumbnail((640, 640), Image.Resampling.LANCZOS)
+            if image.mode in {'RGBA', 'P', 'LA'}:
+                image = image.convert('RGB')
+            out = BytesIO()
+            image.save(out, format='JPEG', quality=80, optimize=True)
+            return out.getvalue(), 'image/jpeg'
+        except Exception:
+            return data, content_type
+
     @app.get("/api/image-proxy", response_model=None)
     async def image_proxy(
         url: str = Query(..., description="URL-encoded image URL to proxy"),
@@ -6668,9 +6697,13 @@ def create_app(
                 host,
                 cache_id,
             )
+        proxy_data, proxy_content_type = _resize_cover_for_mobile(
+            result.data,
+            result.content_type,
+        )
         return Response(
-            content=result.data,
-            media_type=result.content_type,
+            content=proxy_data,
+            media_type=proxy_content_type,
             headers={
                 "Cache-Control": "public, max-age=86400",
                 "X-Content-Type-Options": "nosniff",
