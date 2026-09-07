@@ -7466,6 +7466,9 @@ def create_app(
                         "uname": item.uname,
                         "message": item.message,
                         "like_count": item.like_count,
+                        "ctime": item.ctime,
+                        "reply_count": item.reply_count,
+                        "avatar": item.avatar,
                     }
                     for item in comments
                 ],

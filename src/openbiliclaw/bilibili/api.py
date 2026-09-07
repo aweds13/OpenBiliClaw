@@ -175,6 +175,9 @@ class CommentInfo:
     uname: str
     message: str
     like_count: int = 0
+    ctime: int = 0
+    reply_count: int = 0
+    avatar: str = ""
 
 
 class BilibiliAPIClient:
@@ -1296,6 +1299,9 @@ class BilibiliAPIClient:
                 uname=str(_json_object(reply.get("member", {})).get("uname", "")),
                 message=str(_json_object(reply.get("content", {})).get("message", "")),
                 like_count=int(reply.get("like", 0)),
+                ctime=int(reply.get("ctime", 0)),
+                reply_count=int(reply.get("rcount", 0)),
+                avatar=str(_json_object(reply.get("member", {})).get("avatar", "")),
             )
             for reply in replies
         ]
