@@ -31,4 +31,4 @@
 
 同配置、同数据库、完整后台进程加载修复后，三次惊喜队列读取为 386.6 / 403.7 / 361.8ms；并发 ping 为 **8.6 / 5.8 / 5.8ms**。测试期间仍有回归与后台负载，队列自身绝对耗时不与之前直接做速度比较；确认的是其读取不再阻塞主 API。真实换批返回 10 条耗时 858.0ms，HTTP 库存、同版本 WebSocket 与后续 GET 一致，推荐 ID / shown 均已落库，验证失败列表为空。这些仍是本机请求样本，不是手机网络和渲染时间。
 
-原始聚合结果：[隔离读取](results/delight-isolation-after.json)、[页面并发读取](results/delight-isolation-concurrent-after.json)、[真实换批](results/delight-isolation-serve.json)。验收后本机运行 `fix/delight-read-isolation` 修复版；原 main 优化仍完整保留，新补修尚未合入 main。
+原始聚合结果：[隔离读取](results/delight-isolation-after.json)、[页面并发读取](results/delight-isolation-concurrent-after.json)、[真实换批](results/delight-isolation-serve.json)。上述验收在 `fix/delight-read-isolation` 分支完成，代码修复提交为 `db9667ab`。合并收尾将此修复完整纳入 main，并从 main 以原配置、原数据库启动完整服务；确认 ping、惊喜队列与库存接口正常后清理本次分支及 worktree。此前推荐排序优化完整保留。
