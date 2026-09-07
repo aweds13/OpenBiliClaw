@@ -5,6 +5,13 @@
 OpenBiliClaw 采用分层架构设计，从上到下依次为：
 
 ```text
+recommendation request → main API → optional Unix-socket recommendation process
+                                  → current SQLite snapshot → full ranking worker
+                                  → atomic history + shown COMMIT → cards + exact platform inventory
+main API ← validated response inventory / 2s active-client inventory watcher
+         → runtime-stream pool_updated → client total + source badges
+legacy outbox → immutable claimed batches → DB commit → acknowledge only that batch
+
 LAN clients ─ HTTP（默认）────────────→ IPv4 0.0.0.0 + IPv6 [::] listeners → one uvicorn / FastAPI app
 public clients ─ HTTPS（可选）→ Caddy :443 ─ shared-loopback HTTP ─────────────────────────────┤
 trusted LAN ─ HTTPS（可选）──→ TLS Proxy :8443 ─ loopback/Compose HTTP ───────────────────────┘

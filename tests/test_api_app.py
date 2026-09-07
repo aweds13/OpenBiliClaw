@@ -433,7 +433,7 @@ def test_injected_runtime_initializes_inventory_from_database_and_controller_tar
     assert gate.inventory_priority_state is InventoryPriorityState.EMPTY
     response = TestClient(app).post("/api/recommendations/append", json={"excluded_bvids": []})
     assert response.status_code == 200
-    assert response.json() == {"items": []}
+    assert response.json() == {"items": [], "has_more": False, "pool_status": None}
     assert gate.inventory_priority_state is InventoryPriorityState.EMPTY
 
 
@@ -7202,6 +7202,7 @@ class TestBackendAPI:
         assert response.status_code == 200
         assert [event["event_type"] for event in memory.events] == ["reshuffle"]
         assert response.json() == {
+            "pool_status": None,
             "items": [
                 {
                     "id": 11,
@@ -7265,7 +7266,7 @@ class TestBackendAPI:
                     "published_at": "",
                     "published_label": "",
                 },
-            ]
+            ],
         }
         assert_publication(response.json()["items"][0])
         assert hub.events[-1]["type"] == "refresh.pool_updated"
@@ -7368,7 +7369,7 @@ class TestBackendAPI:
         response = client.post("/api/recommendations/reshuffle")
 
         assert response.status_code == 200
-        assert response.json() == {"items": []}
+        assert response.json() == {"items": [], "pool_status": None}
         assert database.count_calls == count_calls_after_construction
         assert any(
             event.get("pool_available_count") == 4
@@ -7533,6 +7534,7 @@ class TestBackendAPI:
         assert response.status_code == 200
         assert recommendation_engine.calls == [({"profile": "ok"}, ["BV1A", "BV1B"], 10)]
         assert response.json() == {
+            "pool_status": None,
             "items": [
                 {
                     "id": 22,
@@ -7659,9 +7661,9 @@ class TestBackendAPI:
         )
 
         assert reshuffle.status_code == 200
-        assert reshuffle.json() == {"items": []}
+        assert reshuffle.json() == {"items": [], "pool_status": None}
         assert append.status_code == 200
-        assert append.json() == {"items": [], "has_more": False}
+        assert append.json() == {"items": [], "has_more": False, "pool_status": None}
         assert soul.profile_calls == 0
         assert rec.calls == 0
         assert runtime.requests == [("pool_empty", True)]
@@ -21432,7 +21434,7 @@ def test_scoped_short_batch_wakes_existing_replenishment_path() -> None:
     )
 
     assert response.status_code == 200
-    assert response.json() == {"items": []}
+    assert response.json() == {"items": [], "has_more": False, "pool_status": None}
     # Pool-wide inventory is healthy, so only the scoped shortfall can explain
     # this; it must wake the existing forced replenishment path.
     assert runtime.requests and runtime.requests[0][1] is True
@@ -22025,3 +22027,54 @@ class TestSoulEngineFeedbackConfigPlumbing:
         assert ctx.soul_engine is not None
         assert ctx.soul_engine.unified_interest_line_enabled is True
         assert ctx.soul_engine._feedback_batch_threshold == 6
+
+
+@pytest.mark.parametrize("action", ["append", "reshuffle"])
+def test_recommendation_response_returns_exact_platform_inventory(action: str) -> None:
+    from fastapi.testclient import TestClient
+
+    database = _AvailabilityDatabase(
+        SimpleNamespace(total_available=37, by_platform={"bilibili": 30, "zhihu": 7})
+    )
+    client = TestClient(
+        _scoped_app(_ScopedResultEngine(), _ScopedFakeRuntimeController(), database)
+    )
+    response = client.post(f"/api/recommendations/{action}", json={"excluded_bvids": []})
+    assert response.status_code == 200
+    status = response.json()["pool_status"]
+    assert status["pool_available_count"] == sum(status["platform_available_counts"].values())
+    assert status["pool_available_count"] == 37
+    assert status["pool_status_version"] > 0
+
+
+async def test_recommendation_proxy_relays_inventory_to_main_event_hub(monkeypatch) -> None:
+    import httpx
+
+    monkeypatch.setenv("OPENBILICLAW_RECOMMENDATION_ONLY", "1")
+    upstream = _scoped_app(
+        _ScopedResultEngine(),
+        _ScopedFakeRuntimeController(),
+        _AvailabilityDatabase(
+            SimpleNamespace(total_available=37, by_platform={"bilibili": 30, "zhihu": 7})
+        ),
+    )
+    monkeypatch.delenv("OPENBILICLAW_RECOMMENDATION_ONLY")
+    monkeypatch.setenv("OPENBILICLAW_RECOMMENDATION_SOCK", "/unused-test.sock")
+    monkeypatch.setattr(
+        httpx, "AsyncHTTPTransport", lambda **kwargs: httpx.ASGITransport(app=upstream)
+    )
+    main = _scoped_app(_ScopedResultEngine(), _ScopedFakeRuntimeController())
+    queue = await main.state.runtime_context.event_hub.subscribe()
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=main),
+        base_url="http://127.0.0.1",
+    ) as client:
+        response = await client.post("/api/recommendations/append", json={"excluded_bvids": []})
+    assert response.status_code == 200
+    event = await asyncio.wait_for(queue.get(), timeout=1)
+    assert event["type"] == "refresh.pool_updated"
+    assert event["pool_available_count"] == 37
+    assert (
+        event["platform_available_counts"]
+        == response.json()["pool_status"]["platform_available_counts"]
+    )

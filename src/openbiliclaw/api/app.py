@@ -144,6 +144,7 @@ from openbiliclaw.api.models import (
     RecommendationClickResponse,
     RecommendationListResponse,
     RecommendationOut,
+    RecommendationPoolStatus,
     RecommendationRefreshResponse,
     RecommendationReshuffleIn,
     RecommendationReshuffleResponse,
@@ -2832,9 +2833,7 @@ def create_app(
         import httpx as _httpx
 
         @app.middleware("http")
-        async def proxy_recommendation_api(
-            request: Request, call_next: Any
-        ) -> Any:
+        async def proxy_recommendation_api(request: Request, call_next: Any) -> Any:
             if not request.url.path.startswith("/api/recommendations"):
                 return await call_next(request)
             target_url = f"http://localhost{request.url.path}"
@@ -2851,7 +2850,7 @@ def create_app(
             )
             try:
                 async with _httpx.AsyncClient(
-                    transport=transport, timeout=30.0
+                    transport=transport, timeout=30.0, trust_env=False
                 ) as client:
                     upstream = await client.request(
                         request.method,
@@ -2865,6 +2864,15 @@ def create_app(
                     {"error": "recommendation_service_unavailable"},
                     status_code=502,
                 )
+            if request.method == "POST" and upstream.is_success:
+                _invalidate_recommendation_snapshot()
+                try:
+                    status = upstream.json().get("pool_status")
+                    if isinstance(status, dict):
+                        validated = RecommendationPoolStatus.model_validate(status)
+                        await _broadcast_recommendation_pool_status(validated.model_dump())
+                except (ValueError, TypeError, AttributeError):
+                    logger.warning("Recommendation response has no valid inventory snapshot")
             response_headers = {
                 key: value
                 for key, value in upstream.headers.items()
@@ -6741,7 +6749,7 @@ def create_app(
         card/list size. A 640px JPEG keeps quality while cutting transfer size
         dramatically. Failures fall back to the original bytes.
         """
-        if not data or 'image' not in content_type:
+        if not data or "image" not in content_type:
             return data, content_type
         try:
             from io import BytesIO
@@ -6752,11 +6760,11 @@ def create_app(
             if image.width <= 640:
                 return data, content_type
             image.thumbnail((640, 640), Image.Resampling.LANCZOS)
-            if image.mode in {'RGBA', 'P', 'LA'}:
-                image = image.convert('RGB')
+            if image.mode in {"RGBA", "P", "LA"}:
+                image = image.convert("RGB")
             out = BytesIO()
-            image.save(out, format='JPEG', quality=80, optimize=True)
-            return out.getvalue(), 'image/jpeg'
+            image.save(out, format="JPEG", quality=80, optimize=True)
+            return out.getvalue(), "image/jpeg"
         except Exception:
             return data, content_type
 
@@ -8012,6 +8020,13 @@ def create_app(
 
     @app.on_event("startup")
     async def startup_refresh_loop() -> None:
+        if (
+            os.environ.get("OPENBILICLAW_RECOMMENDATION_SOCK", "").strip()
+            and os.environ.get("OPENBILICLAW_RECOMMENDATION_ONLY", "").strip() != "1"
+        ):
+            app.state.pool_inventory_watch_task = asyncio.create_task(
+                _watch_cross_process_pool_inventory(), name="pool_inventory_watch"
+            )
         # Prune the cover-image cache on startup (consumed + unsaved content,
         # plus aged orphans). The periodic pass runs from RefreshRuntime.
         try:
@@ -8066,6 +8081,11 @@ def create_app(
 
     @app.on_event("shutdown")
     async def shutdown_refresh_loop() -> None:
+        inventory_watch = getattr(app.state, "pool_inventory_watch_task", None)
+        if inventory_watch is not None:
+            inventory_watch.cancel()
+            with suppress(asyncio.CancelledError):
+                await inventory_watch
         apply_task = getattr(app.state, "config_apply_task", None)
         if apply_task is not None and not apply_task.done():
             apply_task.cancel()
@@ -9522,6 +9542,48 @@ def create_app(
             ]
         return payload
 
+    async def _read_recommendation_pool_status() -> RecommendationPoolStatus | None:
+        """Read exact total/platform counts together after the serving commit."""
+        loader = getattr(ctx.database, "load_pool_platform_availability_async", None)
+        if not callable(loader):
+            return None
+        # Timestamp the start of the read: a slow older read must not overwrite
+        # a newer snapshot in clients when HTTP and WebSocket messages race.
+        version = time.time_ns() // 1_000_000
+        try:
+            snapshot = await loader(xhs_self_nickname=_xhs_self_nickname())
+            return RecommendationPoolStatus(
+                pool_available_count=snapshot.total_available,
+                platform_available_counts=dict(snapshot.by_platform),
+                pool_status_version=version,
+            )
+        except Exception:
+            logger.exception("Post-commit recommendation inventory read failed")
+            return None
+
+    async def _broadcast_recommendation_pool_status(status: dict[str, Any]) -> None:
+        nonlocal runtime_status_cache, runtime_status_cached_at
+        runtime_status_cache = None
+        runtime_status_cached_at = 0.0
+        publish = getattr(ctx.event_hub, "publish", None)
+        if callable(publish):
+            await publish({"type": "refresh.pool_updated", "phase": "done", **status})
+
+    async def _watch_cross_process_pool_inventory() -> None:
+        """Relay committed worker changes to the main API's connected clients."""
+        previous: dict[str, int] | None = None
+        while True:
+            # One app-owned reader, regardless of the number of clients. Two
+            # seconds bounds refill badge lag without polling per WebSocket.
+            if getattr(ctx.event_hub, "_subscribers", None):
+                status = await _read_recommendation_pool_status()
+                if status is not None and status.platform_available_counts != previous:
+                    previous = dict(status.platform_available_counts)
+                    await _broadcast_recommendation_pool_status(status.model_dump())
+            else:
+                previous = None
+            await asyncio.sleep(2.0)
+
     async def _publish_pool_status_snapshot(
         counts: dict[str, int] | None = None,
         message: str = "推荐池已同步",
@@ -9572,6 +9634,9 @@ def create_app(
                 }
             else:
                 pool_status = await asyncio.to_thread(_runtime_pool_status_payload)
+        exact_status = await _read_recommendation_pool_status()
+        if exact_status is not None:
+            pool_status.update(exact_status.model_dump())
         controller_target = getattr(ctx.runtime_controller, "pool_target_count", None)
         if controller_target is not None:
             pool_status["pool_target_count"] = max(0, int(controller_target))
@@ -9739,6 +9804,7 @@ def create_app(
                 status_code=503,
                 detail="platform availability is unavailable on this storage backend",
             )
+        version = time.time_ns() // 1_000_000
         try:
             snapshot = await loader(xhs_self_nickname=_xhs_self_nickname())
         except Exception as exc:
@@ -9757,6 +9823,7 @@ def create_app(
         return PlatformAvailabilityResponse(
             total_available=max(0, int(getattr(snapshot, "total_available", 0))),
             by_platform=by_platform,
+            pool_status_version=version,
         )
 
     @app.post("/api/recommendations/reshuffle", response_model=RecommendationReshuffleResponse)
@@ -9848,6 +9915,7 @@ def create_app(
             force=available_after == 0 or _scoped_batch_came_up_short(source_platform, items, 10),
             available_count=available_after,
         )
+        pool_status = await _read_recommendation_pool_status()
         logger.info(
             "recommendation_request_timing action=reshuffle precheck_ms=%.1f "
             "profile_ms=%.1f pool_snapshot_ms=%.1f embedding_ms=%.1f "
@@ -9862,7 +9930,10 @@ def create_app(
             float(getattr(timings, "persist_ms", 0.0)),
             (time.perf_counter() - request_started) * 1000.0,
         )
-        return RecommendationReshuffleResponse(items=_serialize_recommendation_items(items))
+        return RecommendationReshuffleResponse(
+            items=_serialize_recommendation_items(items),
+            pool_status=pool_status,
+        )
 
     @app.post("/api/recommendations/append", response_model=RecommendationAppendResponse)
     async def append_recommendations(
@@ -9920,6 +9991,7 @@ def create_app(
             ),
             available_count=available_after,
         )
+        pool_status = await _read_recommendation_pool_status()
         logger.info(
             "recommendation_request_timing action=append precheck_ms=%.1f "
             "profile_ms=%.1f pool_snapshot_ms=%.1f embedding_ms=%.1f "
@@ -9936,7 +10008,17 @@ def create_app(
         )
         return RecommendationAppendResponse(
             items=_serialize_recommendation_items(items),
-            has_more=len(_serialize_recommendation_items(items)) >= 10,
+            pool_status=pool_status,
+            has_more=(
+                (
+                    pool_status.platform_available_counts.get(payload.source_platform, 0)
+                    if payload.source_platform
+                    else pool_status.pool_available_count
+                )
+                > 0
+                if pool_status is not None
+                else len(items) >= 10
+            ),
         )
 
     @app.post("/api/recommendations/refresh", response_model=RecommendationRefreshResponse)
@@ -9993,9 +10075,7 @@ def create_app(
         payload.update(image_fetch_coordinator.status_payload())
         settlement_queue = getattr(ctx, "dialogue_settlement_queue", None)
         if settlement_queue is not None:
-            payload["dialogue_settlement_depth"] = int(
-                getattr(settlement_queue, "depth", 0) or 0
-            )
+            payload["dialogue_settlement_depth"] = int(getattr(settlement_queue, "depth", 0) or 0)
             payload["dialogue_settlement_max_depth"] = int(
                 getattr(settlement_queue, "max_depth", 0) or 0
             )
@@ -10180,6 +10260,7 @@ def create_app(
         if item is None:
             return PendingNotificationResponse(item=None)
         return PendingNotificationResponse(item=PendingNotificationOut(**item))
+
     def _cognition_update_id(item: dict[str, Any]) -> str:
         """Return a stable cognition-update id, even for legacy rows without one."""
         existing = str(item.get("id") or "").strip()
@@ -10747,9 +10828,7 @@ def create_app(
 
         async def _respond(dialogue_owner: Any) -> str:
             if turn is not None:
-                return await _generate_durable_chat_reply(
-                    turn, dialogue_owner, progress=_progress
-                )
+                return await _generate_durable_chat_reply(turn, dialogue_owner, progress=_progress)
             return str(
                 await asyncio.wait_for(
                     dialogue_owner.respond(message, progress=_progress),

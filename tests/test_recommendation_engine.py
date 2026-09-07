@@ -6638,3 +6638,42 @@ def test_evo_delight_reason_uses_only_formal_user_facing_copy() -> None:
         )
         == ""
     )
+
+
+async def test_worker_mode_serve_commits_before_return_and_ignores_stale_snapshot(tmp_path):
+    """Isolation must not bypass the final DB commit or reuse consumed candidates."""
+    from openbiliclaw.runtime.serve_outbox import ServeOutbox
+    from openbiliclaw.runtime.serve_snapshot import ServeSnapshotStore
+
+    db = Database(tmp_path / "serve.db")
+    db.initialize()
+    for index in range(6):
+        _seed_visible(
+            db,
+            f"BVatomic{index}",
+            title=f"Unique topic {index}",
+            source="search",
+            relevance_score=0.9,
+            topic_group=f"group{index}",
+            pool_expression="Prepared copy",
+            pool_topic_label=f"topic{index}",
+        )
+    store = ServeSnapshotStore(tmp_path / "snapshot.json")
+    store.save(await db.load_pool_serve_snapshot_async(limit=40))
+    outbox = ServeOutbox(tmp_path / "outbox.jsonl")
+    engine = RecommendationEngine(
+        llm=_DummyLLM(),
+        database=db,
+        serve_snapshot_store=store,
+        serve_outbox=outbox,
+    )
+    try:
+        batches = [await engine.serve_with_result(_build_profile(), limit=2) for _ in range(3)]
+        ids = [rec.content.bvid for batch in batches for rec in batch.items]
+        assert len(ids) == len(set(ids)) == 6
+        assert all(rec.recommendation_id > 0 for batch in batches for rec in batch.items)
+        assert db.count_pool_candidates() == 0
+        assert len(db.get_recommendations(limit=10)) == 6
+        assert outbox.count() == 0
+    finally:
+        db.close()

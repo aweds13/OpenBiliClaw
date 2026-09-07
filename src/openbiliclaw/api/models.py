@@ -331,10 +331,19 @@ class ContentHistoryResponse(BaseModel):
     has_more: bool = False
 
 
+class RecommendationPoolStatus(BaseModel):
+    """Post-commit inventory shared by cards, badges and runtime events."""
+
+    pool_available_count: int = Field(ge=0)
+    platform_available_counts: dict[str, int] = Field(default_factory=dict)
+    pool_status_version: int = Field(ge=0)
+
+
 class RecommendationReshuffleResponse(BaseModel):
     """Immediate recommendation reshuffle result."""
 
     items: list[RecommendationOut]
+    pool_status: RecommendationPoolStatus | None = None
 
 
 class RecommendationAppendResponse(RecommendationReshuffleResponse):
@@ -389,6 +398,7 @@ class PlatformAvailabilityResponse(BaseModel):
     """
 
     total_available: int = 0
+    pool_status_version: int = 0
     by_platform: dict[str, int] = Field(default_factory=dict)
 
 

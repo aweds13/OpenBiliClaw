@@ -120,7 +120,7 @@ export async function requestJson(path, options = {}) {
       err.details = details;
       throw err;
     }
-    return res.json();
+    return await res.json();
   } finally {
     timeout.cleanup();
   }
@@ -224,7 +224,7 @@ export async function fetchContentHistory(category, limit = 12, cursorOrOffset =
 export async function reshuffleRecommendations(excludedBvids = []) {
   const data = await requestJson(
     "/recommendations/reshuffle",
-    json({ excluded_bvids: excludedBvids }),
+    { ...json({ excluded_bvids: excludedBvids }), timeoutMs: DEFAULT_READ_TIMEOUT_MS },
   );
   return { ...data, items: Array.isArray(data.items) ? data.items : [] };
 }

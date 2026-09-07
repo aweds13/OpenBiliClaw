@@ -505,13 +505,9 @@ class RecommendationEngine:
         self._bilibili_client = bilibili_client
         self._serve_snapshot_store = serve_snapshot_store
         self._serve_outbox = serve_outbox
-        # In-memory copy of the last worker-published snapshot. Reading a JSON
-        # snapshot from disk through asyncio.to_thread can queue behind busy
-        # background worker threads; serving from this cache keeps repeated
-        # 加载更多 / 换一批 responsive.
-        self._cached_serve_snapshot: Any | None = None
-        self._cached_serve_snapshot_at: float = 0.0
-        self._snapshot_refresh_inflight = False
+        # Constructor arguments above remain compatible with existing runtime
+        # builders. Serving uses current DB snapshots and atomic commits;
+        # the old outbox is inspected only for upgrade recovery diagnostics.
         # In-memory cache of the user's visual-profile centroids (pos/neg),
         # rebuilt in the background by rebuild_visual_profile(). serve() reads
         # this only — never triggers a rebuild or a cover fetch on the hot path.
@@ -708,7 +704,6 @@ class RecommendationEngine:
         excluded_bvids: frozenset[str] = frozenset(),
         expression_mode: Literal["realtime", "precomputed"] = "precomputed",
         source_platform: str = "",
-        fast_path: bool = False,
     ) -> ServeResult:
         """Serve one serialized batch with inventory/timing metadata."""
         async with self._serve_lock:
@@ -718,45 +713,7 @@ class RecommendationEngine:
                 excluded_bvids=excluded_bvids,
                 expression_mode=expression_mode,
                 source_platform=source_platform,
-                fast_path=fast_path,
             )
-
-    async def _refresh_serve_snapshot_cache(self) -> None:
-        """Reload the worker-published snapshot in the background."""
-        try:
-            fresh = await asyncio.to_thread(self._serve_snapshot_store.load)
-            if fresh is not None:
-                self._cached_serve_snapshot = fresh
-                self._cached_serve_snapshot_at = time.monotonic()
-        except Exception:
-            logger.exception("Background serve snapshot refresh failed")
-        finally:
-            self._snapshot_refresh_inflight = False
-
-    @staticmethod
-    def _fast_diverse_rank(
-        candidates: list[DiscoveredContent],
-        limit: int,
-    ) -> list[DiscoveredContent]:
-        """Cheap platform round-robin selection for the fast append/reshuffle path."""
-        buckets: dict[str, list[DiscoveredContent]] = {}
-        for item in candidates:
-            key = str(getattr(item, "source_platform", "") or "other")
-            buckets.setdefault(key, []).append(item)
-        keys = list(buckets.keys())
-        ranked: list[DiscoveredContent] = []
-        while len(ranked) < limit:
-            progressed = False
-            for key in keys:
-                if len(ranked) >= limit:
-                    break
-                bucket = buckets[key]
-                if bucket:
-                    ranked.append(bucket.pop(0))
-                    progressed = True
-            if not progressed:
-                break
-        return ranked
 
     def _enforce_platform_scope(
         self,
@@ -807,7 +764,6 @@ class RecommendationEngine:
         excluded_bvids: frozenset[str],
         expression_mode: Literal["realtime", "precomputed"],
         source_platform: str = "",
-        fast_path: bool = False,
     ) -> ServeResult:
         """Unified recommendation entry point — always picks from the pool.
 
@@ -833,28 +789,22 @@ class RecommendationEngine:
         pool_snapshot_started = time.perf_counter()
         snapshot: Any | None = None
         curator_snapshot: tuple[list[dict[str, object]], list[dict[str, object]]] | None = None
-        if self._serve_snapshot_store is not None and expression_mode == "precomputed":
-            # Phase 1: prefer the worker-published snapshot so serve does not
-            # need to open a fresh SQLite read transaction on every refresh.
-            now = time.monotonic()
-            if self._cached_serve_snapshot is not None:
-                snapshot = self._cached_serve_snapshot
-                logger.info("serve(%s) using in-memory snapshot", label)
-                if (
-                    now - self._cached_serve_snapshot_at >= 3.0
-                    and not self._snapshot_refresh_inflight
-                ):
-                    # Keep serving from memory now, but refresh the cache in the
-                    # background so the next request sees a newer snapshot.
-                    self._snapshot_refresh_inflight = True
-                    asyncio.create_task(self._refresh_serve_snapshot_cache())
-            else:
-                snapshot = await asyncio.to_thread(self._serve_snapshot_store.load)
-                if snapshot is not None:
-                    self._cached_serve_snapshot = snapshot
-                    self._cached_serve_snapshot_at = time.monotonic()
-                    logger.info("serve(%s) using worker-published snapshot", label)
-        if snapshot is not None:
+        # Read current inventory on the dedicated SQLite worker. Worker JSON
+        # snapshots cannot fence consumption or apply concurrent feedback.
+        snapshot_loader = getattr(self._database, "load_pool_serve_snapshot_async", None)
+        if callable(snapshot_loader):
+            history_limit = max(1, int(getattr(self._curator, "_history_window", 30)))
+            # Only pass the new keyword when a scope was actually requested:
+            # test doubles and third-party adapters implement the historical
+            # signature, and a cross-platform serve must keep working on them.
+            snapshot_kwargs: dict[str, Any] = {
+                "limit": candidate_limit,
+                "xhs_self_nickname": self._xhs_self_nickname(),
+                "curator_history_limit": history_limit,
+            }
+            if scope:
+                snapshot_kwargs["source_platform"] = scope
+            snapshot = await snapshot_loader(**snapshot_kwargs)
             pool_readiness = dict(snapshot.readiness)
             candidates = self._enforce_platform_scope(
                 self._rows_to_discovered(list(snapshot.candidate_rows)),
@@ -880,76 +830,33 @@ class RecommendationEngine:
                 list(snapshot.feedback_signals),
             )
         else:
-            snapshot_loader = getattr(self._database, "load_pool_serve_snapshot_async", None)
-            if callable(snapshot_loader):
-                history_limit = max(1, int(getattr(self._curator, "_history_window", 30)))
-                # Only pass the new keyword when a scope was actually requested:
-                # test doubles and third-party adapters implement the historical
-                # signature, and a cross-platform serve must keep working on them.
-                snapshot_kwargs: dict[str, Any] = {
+            # Compatibility path for test doubles and third-party adapters.
+            pool_readiness = await asyncio.to_thread(self._pool_readiness_counts)
+            if int(pool_readiness.get("available", 0)) > 0:
+                # Same rule as the snapshot loader: subclasses and test doubles
+                # override this with the historical signature, so a
+                # cross-platform serve must not hand them a new keyword.
+                loader_kwargs: dict[str, Any] = {
                     "limit": candidate_limit,
-                    "xhs_self_nickname": self._xhs_self_nickname(),
-                    "curator_history_limit": history_limit,
+                    "excluded_bvids": excluded_bvids,
                 }
                 if scope:
-                    snapshot_kwargs["source_platform"] = scope
-                snapshot = await snapshot_loader(**snapshot_kwargs)
-                pool_readiness = dict(snapshot.readiness)
-                candidates = self._enforce_platform_scope(
-                    self._rows_to_discovered(list(snapshot.candidate_rows)),
-                    scope,
-                )
-                loaded_count = int(snapshot.loaded_count)
-                if snapshot.platform_topups:
-                    logger.info(
-                        "serve platform floor topped up %s",
-                        ", ".join(f"{name}+{count}" for name, count in snapshot.platform_topups),
-                    )
-                if excluded_bvids:
-                    candidates = [item for item in candidates if item.bvid not in excluded_bvids]
-                after_exclude_count = len(candidates)
-                candidates = self._exclude_disliked_topic_candidates_for_serve(candidates, profile)
-                after_disliked_count = len(candidates)
-                if snapshot.seen_bvids:
-                    candidates = [
-                        item
-                        for item in candidates
-                        if item.bvid not in snapshot.seen_bvids
-                    ]
-                after_viewed_count = len(candidates)
-                candidates = self._filter_candidates_for_publication_serving(candidates)
-                curator_snapshot = (
-                    list(snapshot.curator_signals),
-                    list(snapshot.feedback_signals),
+                    loader_kwargs["source_platform"] = scope
+                (
+                    candidates,
+                    loaded_count,
+                    after_exclude_count,
+                    after_disliked_count,
+                    after_viewed_count,
+                ) = await asyncio.to_thread(
+                    partial(self._load_filtered_serve_candidates, profile, **loader_kwargs)
                 )
             else:
-                # Compatibility path for test doubles and third-party adapters.
-                pool_readiness = await asyncio.to_thread(self._pool_readiness_counts)
-                if int(pool_readiness.get("available", 0)) > 0:
-                    # Same rule as the snapshot loader: subclasses and test doubles
-                    # override this with the historical signature, so a
-                    # cross-platform serve must not hand them a new keyword.
-                    loader_kwargs: dict[str, Any] = {
-                        "limit": candidate_limit,
-                        "excluded_bvids": excluded_bvids,
-                    }
-                    if scope:
-                        loader_kwargs["source_platform"] = scope
-                    (
-                        candidates,
-                        loaded_count,
-                        after_exclude_count,
-                        after_disliked_count,
-                        after_viewed_count,
-                    ) = await asyncio.to_thread(
-                        partial(self._load_filtered_serve_candidates, profile, **loader_kwargs)
-                    )
-                else:
-                    candidates = []
-                    loaded_count = 0
-                    after_exclude_count = 0
-                    after_disliked_count = 0
-                    after_viewed_count = 0
+                candidates = []
+                loaded_count = 0
+                after_exclude_count = 0
+                after_disliked_count = 0
+                after_viewed_count = 0
         before_temporal_count = len(candidates)
         candidates = self._exclude_temporally_stale_candidates_for_serve(candidates)
         after_temporal_count = len(candidates)
@@ -1008,71 +915,8 @@ class RecommendationEngine:
                 timings=ServeTimings(pool_snapshot_ms=pool_snapshot_ms),
             )
 
-        if fast_path and self._serve_outbox is not None and self._serve_snapshot_store is not None:
-            ranked = self._fast_diverse_rank(candidates, limit)
-            recommendations: list[Recommendation] = []
-            for item in ranked:
-                rec = Recommendation(
-                    content=item,
-                    confidence=item.relevance_score,
-                    presented=False,
-                )
-                rec.expression = item.pool_expression.strip()
-                rec.topic_label = item.pool_topic_label.strip()
-                recommendations.append(rec)
-            recommendation_rows = [
-                {
-                    "bvid": rec.content.bvid,
-                    "item_key": rec.content.item_key,
-                    "expression": rec.expression,
-                    "topic": rec.topic_label,
-                    "confidence": rec.confidence,
-                    "presented": 0,
-                }
-                for rec in recommendations
-            ]
-            ranked_bvids = [item.bvid for item in ranked]
-            # Fire-and-forget: the outbox is a handoff buffer. Awaiting the
-            # thread can still stall behind worker drain on the same file.
-            asyncio.create_task(
-                asyncio.to_thread(
-                    self._serve_outbox.append,
-                    recommendation_rows,
-                    ranked_bvids,
-                )
-            )
-            self._last_served_bvids = frozenset(item.bvid for item in ranked if item.bvid)
-            consumed = len(recommendations)
-            pool_counts_after = {
-                key: max(0, int(value)) for key, value in pool_readiness.items()
-            }
-            for key in ("available", "copy_ready", "raw"):
-                if key in pool_counts_after:
-                    pool_counts_after[key] = max(0, pool_counts_after[key] - consumed)
-            if hasattr(self, "_schedule_pool_inventory_commit"):
-                self._schedule_pool_inventory_commit(pool_counts_after)
-            logger.info(
-                "serve(%s) fast path served %d item(s)",
-                label,
-                len(recommendations),
-            )
-            return ServeResult(
-                items=recommendations,
-                pool_counts_after=pool_counts_after,
-                timings=ServeTimings(
-                    pool_snapshot_ms=pool_snapshot_ms,
-                    embedding_ms=0.0,
-                    selector_worker_ms=0.0,
-                    event_loop_resume_delay_ms=0.0,
-                    persist_ms=0.0,
-                ),
-            )
-
-        # Online supergroup merging — collapses semantically-equivalent
-        # topic_groups within this batch (e.g. 动漫/动漫产业/动漫文化) so
-        # the diversifier sees them as a single bucket. Adds 50–200ms of
-        # embedding I/O to the hot path, traded for batch-level richness
-        # that no offline precompute can guarantee at serve time.
+        # Apply the prewarmed canonical map without provider I/O. Cold caches
+        # keep their original groups until the background warmer catches up.
         await self._merge_topic_supergroups(candidates)
 
         prev_bvids = self._last_served_bvids
@@ -1103,9 +947,8 @@ class RecommendationEngine:
                     ensure_ascii=False,
                 ),
             )
-        # Worker snapshots can contain several hundred pool rows. The expensive
-        # MMR/diversity selector only needs the top candidate_limit rows that
-        # the request actually wanted; capping here keeps "换一批" snappy.
+        # Bound the MMR/diversity selector even for compatibility loaders that
+        # return more rows than the requested candidate limit.
         if len(candidates) > candidate_limit:
             candidates = candidates[:candidate_limit]
 
@@ -1266,38 +1109,16 @@ class RecommendationEngine:
         ranked_bvids = [item.bvid for item in ranked]
         persist_started = time.perf_counter()
         if callable(isolated_persist):
-            if self._serve_outbox is not None and self._serve_snapshot_store is not None:
-                # Phase 2: do not block the API hot path on the SQLite writer.
-                # Append the shown/history batch to the outbox and let the
-                # worker process it with its own database connection.
-                asyncio.create_task(
-                    asyncio.to_thread(
-                        self._serve_outbox.append,
-                        recommendation_rows,
-                        ranked_bvids,
-                    )
-                )
-                ids = [0] * len(recommendations)
-                committed_bvids = tuple(rec.content.bvid for rec in recommendations)
-                temporally_stale_bvids = ()
-                skipped_bvids = ()
-                shown_committed = True
-                logger.info(
-                    "serve(%s) enqueued %d shown row(s) to worker outbox",
-                    label,
-                    len(recommendation_rows),
-                )
-            else:
-                persisted = await isolated_persist(recommendation_rows, ranked_bvids)
-                ids = list(persisted.recommendation_ids)
-                # Third-party/legacy storage adapters may still return the older
-                # result shape with recommendation_ids only. Treat that shape as
-                # "all rows committed" until the adapter adopts exact commit
-                # reporting.
-                committed_bvids = getattr(persisted, "committed_bvids", None)
-                temporally_stale_bvids = tuple(getattr(persisted, "temporally_stale_bvids", ()))
-                skipped_bvids = tuple(getattr(persisted, "skipped_bvids", ()))
-                shown_committed = True
+            persisted = await isolated_persist(recommendation_rows, ranked_bvids)
+            ids = list(persisted.recommendation_ids)
+            # Third-party/legacy storage adapters may still return the older
+            # result shape with recommendation_ids only. Treat that shape as
+            # "all rows committed" until the adapter adopts exact commit
+            # reporting.
+            committed_bvids = getattr(persisted, "committed_bvids", None)
+            temporally_stale_bvids = tuple(getattr(persisted, "temporally_stale_bvids", ()))
+            skipped_bvids = tuple(getattr(persisted, "skipped_bvids", ()))
+            shown_committed = True
         else:
             committed_bvids = None
             temporally_stale_bvids = ()

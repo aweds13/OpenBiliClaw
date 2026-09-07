@@ -350,6 +350,8 @@
       300
     );
 
+    const emptyAppendInventory = new Map();
+    let platformPoolStatusVersion = 0;
     let platformAvailabilityRetryAttempt = 0;
     let platformAvailabilityRetryTimer = null;
 
@@ -366,7 +368,7 @@
           byPlatform[slug] = (byPlatform[slug] || 0) + Math.trunc(count);
         }
       }
-      return { total_available: Math.max(0, Math.trunc(total)), by_platform: byPlatform };
+      return { total_available: Math.max(0, Math.trunc(total)), by_platform: byPlatform, pool_status_version: Number(payload?.pool_status_version) || 0 };
     }
 
     // 首次读取失败后的有界恢复；成功过一次就不再重试（后续由库存事件驱动）。
@@ -383,6 +385,23 @@
       }, delayMs);
     }
 
+    function applyCommittedPoolStatus(status) {
+      if (!status || typeof status.pool_available_count !== "number") return false;
+      const version = Number(status.pool_status_version) || 0;
+      if (version < platformPoolStatusVersion) return true;
+      platformPoolStatusVersion = version;
+      state.platformAvailability = normalizePlatformAvailability({
+        total_available: status.pool_available_count,
+        by_platform: status.platform_available_counts,
+        pool_status_version: version,
+      });
+      state.runtimeStatus = normalizeRuntimeStatus({ ...state.runtimeStatus, ...status });
+      renderFilters();
+      renderPoolStatus();
+      maybeAutoLoadAfterPoolRefill();
+      return true;
+    }
+
     async function refreshPlatformAvailability() {
       try {
         const snapshot = normalizePlatformAvailability(
@@ -390,7 +409,13 @@
         );
         if (!snapshot) throw new Error("platform availability unavailable");
         // 只有成功 snapshot 才覆盖旧值。
+        if (snapshot.pool_status_version < platformPoolStatusVersion) return;
+        platformPoolStatusVersion = snapshot.pool_status_version;
         state.platformAvailability = snapshot;
+        state.runtimeStatus = normalizeRuntimeStatus({
+          ...state.runtimeStatus, pool_available_count: snapshot.total_available,
+        });
+        renderPoolStatus();
         platformAvailabilityRetryAttempt = 0;
         // 库存更新只允许重绘 Tab / 空态与自动续页 gate；已经 append 的推荐卡片
         // 不重建、不覆盖（renderVideos 只在当前就是空态或 Tab 被迫回退时才跑）。
@@ -4103,6 +4128,10 @@ ${savedCardFeedbackBarHtml(listKind)}
         ? state.runtimeStatus?.pool_available_count > 0
         : scopedAvailable > 0;
       if (!hasStock) return "pool-empty";
+      const exhaustedAt = emptyAppendInventory.get(activePlatformSlug());
+      const available = scopedAvailable ?? state.runtimeStatus?.pool_available_count ?? 0;
+      if (exhaustedAt !== undefined && available <= exhaustedAt) return "awaiting-refill";
+      emptyAppendInventory.delete(activePlatformSlug());
       const homePage = $("#homePage");
       if (!homePage || homePage.hidden) return "not-home";
       const loadMore = $("#loadMoreBtn");
@@ -7829,6 +7858,7 @@ ${cardFeedbackBarHtml()}`;
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(requestBody)
         });
+        applyCommittedPoolStatus(payload?.pool_status);
         const returned = payload?.items?.length ? normalizeRecommendationList(payload.items) : [];
         if (requestPlatform && reportPlatformScopeLeak("换一批", requestPlatform, returned)) return;
         const fresh = returned.filter((item) => !visibleKeys.has(recommendationKey(item)));
@@ -7849,6 +7879,14 @@ ${cardFeedbackBarHtml()}`;
 
     // 手动「加载更多」与滚动自动续页共用这一条路径。库存为 0 时按钮仍可点：
     // 它负责唤醒后端已有的补货链路；只有自动续页会被库存 gate 拦下。
+    function rememberEmptyAppend(platform) {
+      const inventory = state.platformAvailability;
+      const available = platform
+        ? inventory?.by_platform?.[platform] ?? 0
+        : inventory?.total_available ?? state.runtimeStatus?.pool_available_count ?? 0;
+      emptyAppendInventory.set(platform, available);
+    }
+
     async function appendMore() {
       if (appendMoreInFlight) return;
       appendMoreInFlight = true;
@@ -7860,6 +7898,11 @@ ${cardFeedbackBarHtml()}`;
         const requestBody = { excluded_bvids: state.videos.map((v) => v.bvid) };
         if (requestPlatform) requestBody.source_platform = requestPlatform;
         const payload = await requestJson(ENDPOINTS.append, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(requestBody) });
+        if (!payload) {
+          showToast("加载更多失败，请稍后重试");
+          return;
+        }
+        applyCommittedPoolStatus(payload?.pool_status);
         if (listVersionAtRequest !== recommendationListVersion) return;
         const retryHint = state.autoLoadOnScroll ? "补上后会自动加载" : "稍后可再点一次";
         if (payload?.items?.length) {
@@ -7873,6 +7916,8 @@ ${cardFeedbackBarHtml()}`;
             loadedKeys.add(key);
             return true;
           });
+          if (freshItems.length) emptyAppendInventory.delete(requestPlatform);
+          else rememberEmptyAppend(requestPlatform);
           const appendCameUpShort = freshItems.length < APPEND_BATCH_SIZE;
           state.videos = state.videos.concat(freshItems);
           renderAll();
@@ -7887,6 +7932,7 @@ ${cardFeedbackBarHtml()}`;
             showToast(`这批内容都已反馈过，后台正在补货，${retryHint}`);
           }
         } else {
+          rememberEmptyAppend(requestPlatform);
           showToast(`候选池暂时没有新内容，已请求后台补货，${retryHint}`);
         }
       } finally {
@@ -7919,7 +7965,7 @@ ${cardFeedbackBarHtml()}`;
         last_refresh_at: String(merged.last_refresh_at ?? ""),
         last_notification_at: String(merged.last_notification_at ?? ""),
         unread_count: Number(merged.unread_count ?? state.messages.length ?? 0),
-        pool_available_count: Number(merged.pool_available_count ?? merged.pool_available ?? merged.available_count ?? 0),
+        pool_available_count: Number(state.platformAvailability?.total_available ?? merged.pool_available_count ?? merged.pool_available ?? merged.available_count ?? 0),
         pool_pending_count: Number(merged.pool_pending_count ?? 0),
         pool_target_count: Number(merged.pool_target_count ?? state.config?.scheduler?.pool_target_count ?? 0),
         last_discovered_count: Number(merged.last_discovered_count ?? 0),
@@ -8037,6 +8083,7 @@ ${cardFeedbackBarHtml()}`;
 
     function renderPoolStatus(status = state.runtimeStatus) {
       const runtime = normalizeRuntimeStatus(status);
+      $("#metricPool").textContent = String(runtime.pool_available_count);
       const summary = getPoolStatusSummary(runtime);
       $("#poolAvailable").textContent = summary?.available || "后端未初始化";
       $("#poolReplenished").textContent = summary?.replenished || "—";
@@ -10348,6 +10395,10 @@ ${cardFeedbackBarHtml()}`;
         }, { source: "runtime-event" });
       }
       scheduleDesktopPendingConfirmationRefresh();
+      if (event.type === "refresh.pool_updated" && event.pool_status_version) {
+        if (event.pool_status_version < platformPoolStatusVersion) return;
+        applyCommittedPoolStatus(event);
+      }
       if (event.type === "refresh.pool_updated" && typeof event.pool_available_count === "number") {
         desktopRuntimeGeneration += 1;
         clearDesktopRuntimeRecovery();

@@ -2703,6 +2703,17 @@ function renderPoolStatus(runtimeStatus) {
   elements.poolTopics.textContent = summary.topics;
 }
 
+let committedPoolStatusVersion = 0;
+function applyCommittedPoolStatus(status) {
+  if (!status || typeof status.pool_available_count !== "number") return false;
+  const version = Number(status.pool_status_version) || 0;
+  if (version < committedPoolStatusVersion) return true;
+  committedPoolStatusVersion = version;
+  state.runtimeStatus = mergeRuntimeStatusEvent(state.runtimeStatus, status);
+  renderPoolStatus(state.runtimeStatus);
+  return true;
+}
+
 function runtimeEventCarriesPoolCounts(event) {
   return (
     event?.type === "refresh.pool_updated" ||
@@ -3009,6 +3020,10 @@ function connectRuntimeStream() {
   runtimeStreamClient?.disconnect?.();
   const client = createRuntimeStreamClient({
     onEvent(event) {
+      if (event.pool_status_version) {
+        if (event.pool_status_version < committedPoolStatusVersion) return;
+        applyCommittedPoolStatus(event);
+      }
       state.runtimeEvent = event;
       state.runtimeStatus = mergeRuntimeStatusEvent(state.runtimeStatus, event);
       renderPoolStatus(state.runtimeStatus);
@@ -7293,6 +7308,7 @@ async function loadMoreRecommendations() {
   setHint("再给你往下捞 10 条。", "info");
   try {
     const result = await appendRecommendations(getDisplayedRecommendationBvids());
+    applyCommittedPoolStatus(result.pool_status);
     const incoming = Array.isArray(result.items) ? result.items : [];
     const existing = new Set(getDisplayedRecommendationBvids());
     const appended = incoming.filter((item) => {
@@ -7716,6 +7732,7 @@ async function handleManualRefresh() {
   try {
     const excludedBvids = state.recommendations.map((item) => item?.bvid).filter(Boolean);
     const result = await reshuffleRecommendations(excludedBvids);
+    const inventoryApplied = applyCommittedPoolStatus(result.pool_status);
     if (!Array.isArray(result.items)) {
       setHint("还没初始化好。去「推荐」页点「开始初始化」，完成后再刷新。", "error");
       return;
@@ -7730,7 +7747,12 @@ async function handleManualRefresh() {
     state.hasMoreRecommendations = replacement.preserved
       ? false
       : result.items.length >= 10;
-    state.runtimeStatus = await fetchRuntimeStatus().catch(() => state.runtimeStatus);
+    if (!inventoryApplied) {
+      void fetchRuntimeStatus().then((status) => {
+        state.runtimeStatus = status;
+        renderPoolStatus(state.runtimeStatus);
+      }).catch(() => {});
+    }
     renderPoolStatus(state.runtimeStatus);
     renderRecommendationState(
       getPopupState({

@@ -332,3 +332,13 @@ popup、移动 Web 与桌面 Web 只有 durable 对话中的假设卡片保留 c
 `GET ws://.../api/runtime-stream` 在 20 秒没有业务事件时发送 `{"type":"runtime.heartbeat","sent_at":"..."}`。心跳与普通事件共用唯一 writer，避免并发 `send_json`；鉴权撤销仍在每次发送前和 15 秒 watchdog 中 fail closed。桌面 Web 收到心跳即确认“实时连接正常”，异常 close 则显示“实时流重连中”、记录 close code/reason，并按 3 秒节奏重连；页面进入后台时仍按 visibility 生命周期主动关闭，不把该主动关闭显示成后端离线。
 
 `dy_task_available` 等 task-available 帧用于唤醒浏览器扩展 dispatcher，不是用户活动。桌面 Web 会在运行时状态投影之前丢弃 `dy_task_available`，避免把原始 wire type 显示成首页“现在在忙”；扩展仍照常消费该事件并立即轮询任务。
+
+## 推荐库存响应与多进程同步（2026-09-07）
+
+| 已实现能力 | 接口 |
+| --- | --- |
+| 卡片与库存一起返回 | `POST /api/recommendations/reshuffle`、`POST /api/recommendations/append` 在已有字段旁新增可空 `pool_status`；库存读取失败为 null，旧客户端可忽略该字段。 |
+| 库存读取版本 | `GET /api/recommendations/platform-availability` 新增 `pool_status_version`，和 mutation / `refresh.pool_updated` 共用读取开始时的 Unix 毫秒版本。 |
+| 跨进程广播 | socket 代理把成功响应库存桥接到主 API 的事件总线，补货变动由单个 app-owned 观察任务同步。 |
+
+`pool_status` 示例：`{"pool_available_count":26,"platform_available_counts":{"bilibili":20,"github":6},"pool_status_version":1788750000000}`。两个数量来自同一 canonical 查询；平台没有键即为零。客户端必须保留现有列表和最后一次成功库存，拒绝低版本响应覆盖。失败请求不会返回假推荐 ID 0。手机 Web 读完整 JSON 正文后才清理计时器，换批 / 追加均有 12 秒前端截止时间；失败保留卡片并恢复操作入口。

@@ -151,3 +151,14 @@ durable turn → 固定时间/payload → 确认入口（待聊列表/卡片） 
 海外请求：设置页 `[network].mode` → 系统代理（默认）/ 直连 / 自定义代理 → LLM、YouTube、X/Reddit CLI、Bangumi、GitHub 来源、更新与项目统计；国内平台（含 V2EX）保持独立直连
 手动抖音发现：CLI discover → daemon 同款 producer → 统一关键词终态 → 插件 search/hot/feed → 待评估池
 ```
+
+### 推荐交互一致性
+
+```text
+recommendation request → main API → optional Unix-socket recommendation process
+                                  → current SQLite snapshot → full ranking worker
+                                  → atomic history + shown COMMIT → cards + exact platform inventory
+main API ← validated response inventory / 2s active-client inventory watcher
+         → runtime-stream pool_updated → client total + source badges
+legacy outbox → immutable claimed batches → DB commit → acknowledge only that batch
+```

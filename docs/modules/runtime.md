@@ -695,3 +695,13 @@ compare-and-clear 旧 tuple，不能清除 new permit。进程 shutdown 的同�
 `ContinuousRefreshController.run_forever()` 当前并行启动 refresh、`CandidateEvalCoordinator`、pool precompute、soul pipeline、各来源 producer（含匿名微博与 GitHub official-REST producer）和 proactive push 等 loop。即时断供补货与周期 loop 共用 per-source lock；同一来源因此不会被同一 tick 重复执行。协调器 worker 只执行 LLM evaluation，不持有 SQLite drain lock；claim、完成提交、重试 admission 与补位由单一协调任务管理。限流按 15/30/60/120/300 秒退避（尊重更长 `Retry-After`），缺 provider / 鉴权失败暂停后只接受精确 `startup` 或 `config_*` / `manual_*` 唤醒，连续 3 个成功但零缓存 batch 触发 60/120/300 秒无进展退避和一次补货。热重载只取消 registry 中的父 `refresh_loop`；父任务 gather 协调器子任务、子任务归还所有未完成 token 后，`RuntimeContext` 才构造新 runtime。
 
 Expression copy 与 candidate evaluation 对 rate-limit、timeout、connection、5xx 使用同一条 15/30/60/120/300 秒 transient ladder；provider 提供更长 `Retry-After` 时优先采用。鉴权失败或无 provider 进入 `paused`，只由 startup、manual_* 或 config_* 通知恢复；成功但零写入至少等待 15 秒，避免 malformed singleton 紧循环。
+
+## 推荐进程的库存桥接（2026-09-07）
+
+| 已实现能力 | 行为 |
+| --- | --- |
+| 主 API 事件桥接 | 主 API 转发独立推荐进程成功响应时校验 `pool_status`，清理本进程 runtime/recommendation 缓存，并向本进程 WebSocket 订阅者广播 `refresh.pool_updated`。 |
+| 后台补货同步 | 配置推荐 socket 的主 API 持有一个库存观察任务，仅在有订阅者时每 2 秒读取一次 canonical 平台库存，变化时广播；任务随 app 启停，异常读取保留旧状态。独立推荐进程不启动观察任务。 |
+| 遗留队列恢复 | `ServeOutbox.append()` 用独立原子发布的 batch 文件；`claim_batches()` 将旧 JSONL 纳入独立批次，`acknowledge(batch)` 只删除该已提交批次。失败保留待重试，处理中新增批次不会被清空。升级时需一起重启旧 API / worker，不能混跑仍写旧 JSONL 的旧版本。 |
+
+公开 API：`ServeOutbox.read_all()/count()` 兼容读取遗留文件和新 spool；worker 排空流程使用逐批 ACK，`clear()` 只用于显式清理。普通推荐不再产生 outbox 记录；worker 快照仍可用于观察，不能作为已消费状态的权威来源。没有新增配置或依赖。

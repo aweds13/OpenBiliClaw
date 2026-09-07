@@ -15,7 +15,10 @@ import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +66,7 @@ class WorkerStatusStore:
         path: Path | str | None,
         *,
         max_age_seconds: float = _DEFAULT_MAX_AGE_SECONDS,
-        now: float | None = None,
+        now: Callable[[], float] | None = None,
     ) -> None:
         self.path = Path(path).expanduser() if path else None
         self.max_age_seconds = max(0.0, float(max_age_seconds))

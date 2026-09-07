@@ -286,6 +286,13 @@ descriptor、CLI（适用时）、capability manifest、幂等测试和集成文
 ## 3. 系统架构
 
 ```text
+recommendation request → main API → optional Unix-socket recommendation process
+                                  → current SQLite snapshot → full ranking worker
+                                  → atomic history + shown COMMIT → cards + exact platform inventory
+main API ← validated response inventory / 2s active-client inventory watcher
+         → runtime-stream pool_updated → client total + source badges
+legacy outbox → immutable claimed batches → DB commit → acknowledge only that batch
+
 interactive (dialogue / config probe) ──────────────┐
                                                     ├─ runtime total gate (default 4) ─ ordered instance chain ─ adapter
 background ─ background admission (default 3) ──────┘

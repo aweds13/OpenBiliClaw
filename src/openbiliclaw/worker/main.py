@@ -13,12 +13,16 @@ This package is the API/worker isolation worker entry point:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
 import asyncio
 import contextlib
 import logging
 import os
 import time
-from pathlib import Path
 
 from openbiliclaw.config import load_config
 from openbiliclaw.runtime.serve_outbox import ServeOutbox
@@ -39,15 +43,15 @@ DEFAULT_SERVE_PUBLISH_INTERVAL_SECONDS = 20.0
 async def _drain_serve_outbox(database: Database, runtime_dir: Path) -> None:
     outbox = ServeOutbox(runtime_dir / "serve_outbox.jsonl")
     try:
-        records = outbox.read_all()
-        if not records:
-            return
-        for record in records:
-            rows = list(record.get("recommendation_rows") or [])
-            bvids = list(record.get("ranked_bvids") or [])
-            await database.persist_pool_serve_async(rows, bvids)
-        outbox.clear()
-        logger.info("drained %d serve outbox batch(es)", len(records))
+        batches = await asyncio.to_thread(outbox.claim_batches)
+        for batch, records in batches:
+            for record in records:
+                rows = list(record.get("recommendation_rows") or [])
+                bvids = list(record.get("ranked_bvids") or [])
+                await database.persist_pool_serve_async(rows, bvids)
+            await asyncio.to_thread(outbox.acknowledge, batch)
+        if batches:
+            logger.info("drained %d serve outbox batch(es)", len(batches))
     except Exception:
         logger.exception("Background serve outbox drain failed")
 

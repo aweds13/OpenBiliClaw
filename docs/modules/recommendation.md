@@ -193,7 +193,7 @@ zhihu_only = await engine.reshuffle_recommendations(
 - `source_platform` 是可选 additive 平台作用域，HTTP 入口同名字段接受别名（`xhs` → `xiaohongshu`）并在 Pydantic 边界 canonical 化；未知平台返回 422，绝不静默回退到"全部"或 B 站。省略或空字符串保持旧行为，旧客户端不受影响
 - 平台作用域只缩小候选集合：跳过跨平台保底补位，其余排序、多样性、文案读取、推荐历史写入与 shown 消费全部与"全部"路径共用同一实现
 - 候选读取窗口会额外加上排除项数量，平台保底补入候选后还会执行一次最终排除，确保旧卡不会被补回新批次
-- `*_with_result()` 返回 `ServeResult`；`pool_counts_after` 是无需二次查询即可广播的提交后扣减快照，API 会在响应关键路径之外再发布一次精确库存快照
+- `*_with_result()` 返回 `ServeResult`；`pool_counts_after` 是无需二次查询即可广播的提交后扣减快照，API 会将另行读取的精确总量/平台库存作为 `pool_status` 随响应返回，并发布精确库存事件
 - 过滤掉已展示、已明确反馈和已降级的候选
 - 优先按 `candidate_tier`、`relevance_score` 和最近评分时间排序
 - 同一批会优先按 `topic_key` 分桶，每个 topic 先出 1 条，再按分数回填
@@ -639,3 +639,13 @@ report: PoolHealthReport = curator.check_pool_health()
 21. **新确认兴趣只应被轻推，不应刷屏**：探针确认是用户给出的方向许可，不是 24h 内把同一方向塞满推荐流的理由；滚动预算与同批硬上限必须同时存在，前者降低排序冲动，后者防止最终回填阶段破坏体验。
 22. **文案 malformed 只追缺项且严格有界**：默认 API/daemon 路径中，成功响应的唯一 keyed 文案立即落库，缺失/重复成员共用 depth=3、最多六次额外 provider 请求的预算；永久 malformed singleton 保持 copy-pending，不再递归调用单条表达。OpenClaw one-shot 显式将该预算设为零，保留有效 subset 并把缺项留给下一请求。provider transient 原样交给 coordinator，按 15/30/60/120/300 秒退避。
 23. **LLM 返回的文本字段必须先验类型再落库**：结构化响应偶尔会把整批结果塞进单个标量字段，`str()` 会把它转成 Python repr，非空校验照样通过，于是脏文案直达用户。所有会持久化的 LLM 文本(推荐文案、`relevance_reason`、`topic_group`)都走 `validated_text_field()` 判类型，非字符串按该项失败处理并 WARNING,不做静默兜底。
+
+## 换批与库存一致性（2026-09-07）
+
+| 已实现能力 | 行为 |
+| --- | --- |
+| 独立推荐进程中的原子消费 | 全量排序仍在线程中执行；每次从独立 SQLite 连接读当前候选，推荐历史与 shown 标记在一个短事务完成后才返回真实 ID。旧 worker JSON 快照和 outbox 不再参与交互式选取或写入。 |
+| 同批库存 | `POST /api/recommendations/{reshuffle,append}` 新增可空 `pool_status`，包含 `pool_available_count`、`platform_available_counts`、`pool_status_version`（读取开始时的 Unix 毫秒数）；总量与来源余量由同一次 canonical 查询得到。读取失败保持卡片成功、返回 null，由客户端有界补读，禁止伪造全零。 |
+| 多表面收敛 | 手机 Web、桌面 Web、扩展先应用响应库存并拒绝旧版本覆盖；原生 Flutter 客户端在 OpenBiliClaw-mobile 的配套分支接入。CLI 共用原子消费引擎，无持久库存徽标。 |
+
+公开 API：`serve_with_result()` 保持完整排序与缓存文案；`ServeResult.pool_counts_after` 是内部扣减估计，不能替代 HTTP 的精确 `pool_status`。`fast_path` 实验入口已移除。旧 `serve_snapshot_store` / `serve_outbox` 构造参数仅保留兼容，不再绕过提交。`append.has_more` 优先按请求平台的提交后可用量计算；客户端收到空批次仍暂停自动加载，手动可重试。
