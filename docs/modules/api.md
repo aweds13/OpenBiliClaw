@@ -163,6 +163,7 @@ result，再经过后端身份门禁转换统一事件和账号分区 Node affin
 | 方法与路径 | 状态 | 契约 |
 |---|---|---|
 | `POST /api/delight/respond` | ✅ | `response="dismiss"` 是三端“× / 看过了，不再推荐”的永久消费动作：服务端按 `bvid` 解析 `content_cache` 中的 canonical `source_platform/content_id`，先写 `seen_items`，再置 `delight_seen=1`；后续普通推荐与惊喜推荐均硬排除。`view` 只置用户已看（`delight_seen=1`），`dislike` 另记录负偏好，`like/chat` 继续保留当前候选。 |
+| `GET /api/delight/pending-batch` | ✅ | 动态阈值、候选查询与不喜欢主题过滤在线程池完整执行；返回 liked/delivered 队列成员，避免读取阻塞主 API 的推荐转发。参数与响应不变。 |
 | `POST /api/delight/sent` | ✅ | 仅确认主动通知已送达并维护推送冷却，不代表用户已看，不写 `seen_items`，也不置 `delight_seen`；该候选仍会被 `GET /api/delight/pending-batch` 返回用于 popup 重灌。UI 叉号不得把它作为消费路径。 |
 
 ## 推荐反馈端点
@@ -346,6 +347,10 @@ popup、移动 Web 与桌面 Web 只有 durable 对话中的假设卡片保留 c
 | 跨进程广播 | socket 代理把成功响应库存桥接到主 API 的事件总线，补货变动由单个 app-owned 观察任务同步。 |
 
 `pool_status` 示例：`{"pool_available_count":26,"platform_available_counts":{"bilibili":20,"github":6},"pool_status_version":1788750000000}`。两个数量来自同一 canonical 查询；平台没有键即为零。客户端必须保留现有列表和最后一次成功库存，拒绝低版本响应覆盖。失败请求不会返回假推荐 ID 0。手机 Web 读完整 JSON 正文后才清理计时器，换批 / 追加均有 12 秒前端截止时间；失败保留卡片并恢复操作入口。
+
+### 惊喜队列的交互隔离（2026-09-08）
+
+已实现：`GET /api/delight/pending-batch` 使用 FastAPI 同步路由在线程池执行动态阈值、候选历史与不喜欢主题的读取，避免手机刷新时旁路请求阻塞主 API 的换批转发。公开参数、队列上限、筛选与 liked/delivered 行处理及响应字段不变；每次仍读取现有数据，不增加陈旧结果缓存。
 
 ### 活动动态的交互隔离（2026-09-07）
 

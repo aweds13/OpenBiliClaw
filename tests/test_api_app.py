@@ -22121,3 +22121,62 @@ async def test_activity_feed_diagnostics_yield_http_loop_and_coalesce(monkeypatc
         responses = await asyncio.gather(first, second)
     assert all(response.status_code == 200 for response in responses)
     assert calls == 1
+
+
+@pytest.mark.parametrize("blocked_stage", ["threshold", "candidates"])
+async def test_delight_pending_batch_does_not_block_other_requests(blocked_stage) -> None:
+    import threading
+
+    import httpx
+
+    loop_thread = threading.get_ident()
+    started = threading.Event()
+    release = threading.Event()
+
+    def check_thread(stage: str) -> None:
+        assert threading.get_ident() != loop_thread
+        if blocked_stage == stage:
+            started.set()
+            assert release.wait(3), "HTTP loop must remain free during delight reads"
+
+    def threshold() -> float:
+        check_thread("threshold")
+        return 0.75
+
+    def candidates(**kwargs):
+        check_thread("candidates")
+        assert kwargs == {
+            "min_delight_score": 0.75,
+            "limit": 7,
+            "include_liked": True,
+            "include_delivered": True,
+        }
+        return [
+            {"bvid": "kept", "title": "Keep me", "feedback_type": "like"},
+            {"bvid": "filtered", "title": "blocked topic"},
+        ]
+
+    app = create_app(
+        database=SimpleNamespace(get_delight_candidates=candidates),
+        memory_manager=SimpleNamespace(),
+        soul_engine=object(),
+        runtime_controller=SimpleNamespace(
+            _dynamic_delight_threshold=threshold,
+            _load_disliked_topic_phrases=lambda: ["blocked"],
+        ),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+    ) as client:
+        pending = asyncio.create_task(client.get("/api/delight/pending-batch?limit=7"))
+        try:
+            assert await asyncio.to_thread(started.wait, 1)
+            ping = await asyncio.wait_for(client.get("/api/ping"), timeout=1)
+            assert ping.status_code == 200
+            assert not pending.done()
+        finally:
+            release.set()
+            response = await pending
+    assert response.status_code == 200
+    assert [item["bvid"] for item in response.json()["items"]] == ["kept"]
+    assert response.json()["items"][0]["state"] == "liked"

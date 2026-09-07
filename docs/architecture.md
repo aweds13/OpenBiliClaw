@@ -326,6 +326,7 @@ Web durable turn 只在成功 completion CAS 后交接认知与成功事件；�
 ### Recommendation Engine (`recommendation/`)
 - 推荐排序与朋友式推荐表达生成；统一从候选池读取
 - 文案生成与 admitted backlog 解耦：canonical `copy_ready` 使用全部 serve gate 但不套 topic 展示窗口。正数水位生成量为 `max(copy_ready_target-copy_ready, min(pool_target-available, admitted_pending_available))`，再受全部 pending 与单批上限钳制；锁内先领取能净增 topic 展示窗口的行，公开目标达到后只维持 copy-ready 水位。serve/feedback/delight/maintenance 只发非阻塞 refill 通知，provider 工作由 coordinator 承担并在 expression lock 内复核缺口。`0` 是 legacy drain-all 回滚，任何模式都不放松非空文案硬门。
+- 惊喜队列 `GET /api/delight/pending-batch` 的完整阈值和候选读取在 FastAPI 线程池执行，避免手机刷新时占住主 API 事件循环、拖住独立推荐进程的转发响应；队列筛选和返回结构不变。
 - 惊喜推荐复用普通推荐的 copy-ready 与 canonical `seen_items` 状态门：`pool_expression / pool_topic_label` 未同时生成，或身份已经看过时，候选不进入惊喜打分、动态阈值样本、计数或 pending 出口。正式文案就绪后才复用 Evo 的 `relevance_score` 打分，并由条件写入原子同步 `delight_reason / delight_hook`；pending API、CLI 与 runtime stream 继续校验精确快照。evaluator 的内部 `relevance_reason` 永不作为惊喜状态或 UI 推荐理由；旧版错写快照在正式文案就绪后由后台 backfill 修复。普通推荐只在高分行已被 profile-aware 惊喜打分并同步快照后让出该行。移动 Web、桌面 Web 与插件的“×”统一调用 `dismiss`：它不是临时隐藏，而是把 canonical identity 写入 `seen_items` 后永久消费该惊喜。
 - 推荐列表、换批、pending delight 单条/批量及 runtime delight 事件都增量透传 `published_at` / `published_label`。桌面 Web、移动 Web、扩展 popup 与 CLI 按同一规则消费：精确时间优先并转本地相对日期，来源标签兜底，双空值不渲染；API 层不重写相对时间。
 - Bangumi 目录指标 `rating_score / rating_count / source_rank` 与 `favorite_count` 贯穿 subject normalizer → `DiscoveredContent` → `discovery_candidates` → `content_cache` → recommendation/delight API → 三端。评分人数不是评论数、评分不是点赞；无真实值时保持 0 并整段隐藏。

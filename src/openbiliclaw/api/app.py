@@ -1,7 +1,7 @@
 """FastAPI app for the browser-extension backend."""
 
 # [INPUT]: 配置、MemoryManager、Database 与来源事件规范化器
-# [OUTPUT]: create_app() 及浏览器/桌面 Web 共用的 FastAPI 路由
+# [OUTPUT]: create_app() 及浏览器/桌面 Web 共用的 FastAPI 路由；惊喜队列读在线程池执行
 # [POS]: API 组合根，负责请求边界与事件入口，不在此复制来源解析规则
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
@@ -10450,8 +10450,11 @@ def create_app(
         return PendingDelightResponse(item=PendingDelightOut(**item))
 
     @app.get("/api/delight/pending-batch")
-    async def pending_delight_batch(limit: int | None = None) -> dict[str, Any]:
+    def pending_delight_batch(limit: int | None = None) -> dict[str, Any]:
         """Return un-notified delight candidates.
+
+        A synchronous route runs the threshold/history reads in FastAPI's
+        thread pool, keeping concurrent recommendation proxy requests free.
 
         When ``limit`` is omitted the shared
         ``scheduler.delight_queue_limit`` setting decides the queue size.
