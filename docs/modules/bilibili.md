@@ -4,6 +4,8 @@
 
 ## 概述
 
+`BilibiliAPIClient.get_video_comments()` 在 `CommentInfo` 中保留评论 `ctime`（Unix 秒）、`reply_count` 与 `avatar`；缺失时使用 `0 / 0 / ""`，经 HTTP 评论接口透传给原生客户端展示。
+
 `bilibili/` 包是系统访问 B 站 API 的唯一出口；B 站 steady-state discovery 还会通过 `sources/bili_tasks.py`、`runtime/bilibili_producer.py` 和浏览器扩展提供搜索兜底任务桥。整体分四层：
 
 1. **AuthManager** — Cookie 管理和登录验证

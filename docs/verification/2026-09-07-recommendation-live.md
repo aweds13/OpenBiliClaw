@@ -61,3 +61,12 @@ python scripts/verify_recommendation_live.py --requests 6 \
 
 测试后本机 `8420` 服务保留运行修复分支，配置和数据目录仍是原实例；真实 `/m/` 资源逐字节校验与修复分支相符，健康状态为 ok。两个 main 工作区保持干净，尚未合并 main；以后从旧 main 手动启动仍会加载旧代码。
 实体 iPhone 已成功安装以 `lib/main.dart` 为入口的正常 Release App（66.4MB），替换临时测试入口，保留应用数据；安装成功不等于实体交互测试通过。
+
+
+## 合并验证（2026-09-08）
+
+在修复分支合入 main 的 `9adf48b1` 评论字段修复后，重新运行 `pytest tests/test_bilibili_api.py tests/test_api_app.py -q`：638 项通过，2148 个警告，约 158.5 秒；退出时另有 pytest 历史临时目录清理警告。`ruff check src/ tests/ scripts/verify_recommendation_live.py` 和 `git diff --check` 通过。`mypy src/` 仍为既有 3 个文件中的 10 个基线错误，无新增类型错误。
+
+移动端 `64d859f` 包含此前推荐一致性修复与评论时间插值修复，已快进合入并推送该仓库 main；其静态检查无问题，82 项测试通过，正常入口 iOS release 包已安装到配对手机。评论页面尚未完成实体机截图复核。
+
+原工作树的本地配置、测试数据、日志及截图保留在主工作区忽略目录 `output/verification/2026-09-08-recommendation-cleanup/`，不会提交或推送；原测试过程的分支运行描述保留为历史记录。
