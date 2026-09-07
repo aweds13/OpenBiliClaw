@@ -337,7 +337,7 @@ Web durable turn 只在成功 completion CAS 后交接认知与成功事件；�
 - 新兴趣 amplification guard：刚确认的探针兴趣会用 domain/specific/topic key 形成 guard，`PoolCurator` 做 24h rolling budget 软降权，最终批选择做 `max(1, floor(limit*0.25))` 硬上限
 - `_merge_topic_supergroups` — serve 时基于 embedding 把 `动漫杂谈/补番/解说` 等近义 topic 合并为同一聚类
 - `prewarm_supergroup_embeddings` — refresh tick 后台预热所有池中 topic_group embedding，让 reshuffle 跑全 cache hit
-- `PoolServeSnapshot` — 专属 serve DB worker 先清退已超过 temporal eligibility 的 fresh 行，再在一个只读事务内统一读取 readiness、候选窗口、平台补位、持久化 `seen_items` 和 curator 信号；最终 persist 的同一写事务再次复核，Engine 只返回实际提交条目。MMR/多样性纯函数与排序规则不变
+- `PoolServeSnapshot` — 专属 serve DB worker 先清退已超过 temporal eligibility 的 fresh 行，再在一个只读事务内统一读取 readiness、候选窗口、平台补位、持久化 `seen_items` 和 curator 信号；最终 persist 的同一写事务再次复核，Engine 只返回实际提交条目。MMR/多样性纯函数与排序规则不变；同一只读事务仅复用相同 SQL 原始行与动态阈值，仍逐次执行时间资格过滤。MMR 仅在单批复用精确余弦值，条目/顺序与既有算法一致。
 - 推荐历史快路径 — 默认历史查询保留已过期记录；仅面向“尚待展示”的 API/OpenClaw actionable 读取、未读计数与主动通知复用 temporal eligibility，并在 limit 前过滤。legacy pool 补分类写回 temporal 元数据后立即退役过期行，cached-backfill 只读取 fresh/eligible 行且不得丢 temporal 字段
 - `serve_with_result()` — 返回 items、提交后扣减库存与分阶段耗时；推荐历史和 shown 在独立短事务中原子提交，API 先广播结果库存，再 detached 精确收敛
 - 换批是默认硬去重动作：桌面 Web、移动 Web 与扩展 side panel 都提交当前卡片 ID，后端继续叠加推荐历史和 `seen_items`；成功响应只写一条 `reshuffle` 批次事件。桌面端不再暴露“换一批时忽略当前”开关，也不会逐卡提交 `dismiss`。CLI 没有持久卡片列表，只复用后两层去重。

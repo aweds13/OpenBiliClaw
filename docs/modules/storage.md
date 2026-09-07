@@ -73,6 +73,7 @@
 
 | 功能 | 状态 | 说明 |
 |------|------|------|
+| 推荐读取事务内复用 | ✅ | 隔离快照和库存读取复用同一事务的动态阈值及相同 SQL 原始行；每次仍执行完整资格过滤与独立 topic window，事务结束清空。 |
 | Tailnet 节点身份 / helper / 待用凭据迁移隔离 | ✅ | `data/tailnet/` 同时属于导出排除根与目标应用保留根；`.obcbackup` 不含 tsnet 私钥、状态或 `.bootstrap-credential.json`。后者只在本机设置页提交后以私有权限等待下一次启动，仅在 helper 进入 `ready` 后删除（失败/卡住保留以便重试）。目标保留根含嵌套 symlink 时 fail closed。`data/bin/` 的任何大小写变体在导出与导入都被排除；只保留目标机 exact native helper 普通文件，POSIX 还要求原文件可执行再恢复 `0700`，来源包不能迁入 executable。 |
 | 观看完播判定（2026-07-27+） | ✅ | `events.inferred_satisfaction` 现在也覆盖 `view`：`sources/event_format._classify_view_completion` **只判正向**——完播 ≥`_FINISHED_WATCH_MIN_RATIO`（0.8）且观看 ≥15 秒记 `positive/finished_watch`，其余保持 `unknown/fallback`。低完播刻意不判负（自动播放 / 误点 / 预告 / 重看进度重置都长这样），否则会污染 `recent_negative_exemplars` 并影响内容评估。阈值校准见常量注释；改动 `watch_seconds` 来源后需重新校准 |
 | SQLite schema 初始化 | ✅ | `Database.initialize()` 自动创建核心表和索引，支持旧库增量补列 / 补索引；成熟库会自动补 `recommendations(bvid)` 与 `events(event_type, id DESC)` 热路径索引，并创建 `seen_items` canonical 已看账本。旧库初始化时按游标增量回填全部历史「已消费」事件（`view` / `favorite` / `like` / `coin`），不受旧版 2000 条窗口限制；类型集扩大时按 `scanned_event_types_version` 自动倒回重扫一次。 |
@@ -670,6 +671,7 @@ raw_by_source = db.count_pool_raw_material_by_source()
 
 行为说明：
 
+- `count_pool_readiness_isolated()` 在独立只读事务返回同样字段，并在事务内复用动态阈值与相同候选 SQL；事务退出或失败即清空缓存，后续请求读取新提交。
 - `available` 与 `count_pool_candidates()` 保持推荐 serve 同口径。
 - `raw` 包含正式池 fresh raw material 和 `discovery_candidates` 中尚未缓存的候选。
 - `pending` 独立计算，不用 `raw - available` 近似，避免 `seen_items` 已命中的内容被误算为待整理。
@@ -793,3 +795,7 @@ db.suppress_low_confidence_recommendations()
 ### 推荐快照内阈值复用（2026-09-07）
 
 已实现：`load_pool_serve_snapshot()` / `load_pool_platform_availability()` 的隔离读取事务为动态 delight 阈值提供按 floor 区分的临时结果表，候选、库存及平台补位可复用同一读取快照的边界。事务结束立即丢弃，不跨请求缓存候选或库存；最终推荐提交继续验证当前资格。公开方法签名、数据库 schema 与配置均不变。
+
+## 推荐读取的事务内复用（2026-09-08）
+
+`load_pool_serve_snapshot()`、`load_pool_platform_availability()` 与 `count_pool_readiness_isolated()` 使用隔离只读事务；动态 delight 阈值仅在该事务复用。相同连接、SQL、参数的候选原始行也只查询一次，完整投影与轻量投影分别缓存。每次调用仍执行当前时刻的资格检查、已看过滤、来源链接检查和独立 topic window，返回的是独立行副本。成功、回滚和异常关闭均丢弃缓存，后续请求必须读取新提交，不能用它缓存跨请求候选或库存。公开返回结构不变。

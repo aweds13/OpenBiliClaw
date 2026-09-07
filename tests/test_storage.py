@@ -6956,3 +6956,97 @@ def test_serve_snapshot_computes_delight_boundary_once_and_discards_it(tmp_path)
             assert calls == 2, "a new transaction must recalculate against current inventory"
     finally:
         db.close()
+
+
+def test_serve_snapshot_reuses_sql_but_rechecks_filters_and_topic_windows(tmp_path) -> None:
+    db = Database(tmp_path / "snapshot-query.db")
+    db.initialize()
+    for i in range(4):
+        _seed_visible(db, f"BVQUERY{i}", title="query reuse", source="search")
+    original_open = db.open_connection
+    original_filter = Database._filter_available_pool_candidate_rows
+    queries: list[str] = []
+    filter_calls = 0
+
+    def traced_open():
+        conn = original_open()
+        conn.set_trace_callback(queries.append)
+        return conn
+
+    def counted_filter(database, rows, *, viewed_content_keys):
+        nonlocal filter_calls
+        filter_calls += 1
+        return original_filter(database, rows, viewed_content_keys=viewed_content_keys)
+
+    def available_queries() -> int:
+        return sum(
+            statement.lstrip().startswith("SELECT bvid, content_id, source, source_platform")
+            for statement in queries
+        )
+
+    try:
+        with (
+            patch.object(db, "open_connection", traced_open),
+            patch.object(Database, "_filter_available_pool_candidate_rows", counted_filter),
+        ):
+            first = db.load_pool_serve_snapshot(limit=10)
+            assert first.readiness["available"] == 3
+            assert first.readiness["copy_ready"] == 4
+            assert len(first.candidate_rows) == 3
+            assert available_queries() == 1
+            assert filter_calls == 4, "time/seen/linkability checks still run for each caller"
+            # A returned row cannot mutate a later request's cached SQL inputs.
+            first.candidate_rows[0]["title"] = "modified by caller"
+            db.mark_pool_items_shown(["BVQUERY0", "BVQUERY1"])
+            queries.clear()
+            second = db.load_pool_serve_snapshot(limit=10)
+            assert second.readiness["available"] == 2
+            assert all(row["title"] == "query reuse" for row in second.candidate_rows)
+            assert available_queries() == 1, "new transaction must read committed changes"
+            assert filter_calls == 8
+    finally:
+        db.close()
+
+
+def test_isolated_readiness_reuses_threshold_and_cleans_caches_on_failure(tmp_path) -> None:
+    db = Database(tmp_path / "readiness-cache.db")
+    db.initialize()
+    _seed_visible(db, "BVREADYQUERY", title="readiness", source="search")
+    wrappers: list[Database] = []
+    original_isolated = db._isolated_database
+    original_threshold = Database._compute_dynamic_delight_threshold_on
+
+    def capture(**kwargs):
+        isolated = original_isolated(**kwargs)
+        wrappers.append(isolated)
+        return isolated
+
+    try:
+        with (
+            patch.object(db, "_isolated_database", capture),
+            patch.object(
+                Database,
+                "_compute_dynamic_delight_threshold_on",
+                autospec=True,
+                side_effect=original_threshold,
+            ) as compute,
+        ):
+            assert db.count_pool_readiness_isolated()["available"] == 1
+            assert compute.call_count == 1
+        with (
+            patch.object(db, "_isolated_database", capture),
+            patch.object(
+                Database,
+                "_filter_available_pool_candidate_rows",
+                side_effect=RuntimeError("read failed"),
+            ),
+            pytest.raises(RuntimeError, match="read failed"),
+        ):
+            db.count_pool_readiness_isolated()
+        for isolated in wrappers:
+            assert isolated._snapshot_delight_thresholds is None
+            assert isolated._snapshot_available_query_rows is None
+            assert not isolated._preserve_read_transaction
+            assert isolated._conn is None
+    finally:
+        db.close()

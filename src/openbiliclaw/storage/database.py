@@ -5,7 +5,7 @@ content cache, and recommendation history.
 """
 
 # [INPUT]: SQLite 数据库、规范化事件与推荐/来源持久化请求
-# [OUTPUT]: Database facade、事件写入与查询/迁移能力
+# [OUTPUT]: Database facade、事件写入与查询/迁移能力；读取事务内复用相同候选 SQL 结果
 # [POS]: 所有 durable 事件字段的最终存储边界，负责兼容迁移而不推断未知来源
 # [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 
@@ -2007,6 +2007,9 @@ class Database:
         self._source_publication_date_preferences: dict[str, Any] | None = None
         self._preserve_read_transaction = False
         self._snapshot_delight_thresholds: dict[float, float] | None = None
+        self._snapshot_available_query_rows: (
+            dict[tuple[sqlite3.Connection, str, tuple[Any, ...]], tuple[dict[str, Any], ...]] | None
+        ) = None
         # The two queues must remain separate: a slow/background maintenance
         # batch must never sit in front of an interactive recommendation read.
         # Executors are lazy so short-lived CLI/tests that never use async DB
@@ -2396,6 +2399,7 @@ class Database:
         try:
             isolated.conn.execute("BEGIN")
             isolated._snapshot_delight_thresholds = {}
+            isolated._snapshot_available_query_rows = {}
             # Materialize the canonical all-time seen ledger once and reuse it
             # across every availability/candidate helper in this transaction.
             viewed_content_keys, seen_bvids = isolated._seen_state_on(isolated.conn)
@@ -2496,6 +2500,7 @@ class Database:
             raise
         finally:
             isolated._snapshot_delight_thresholds = None
+            isolated._snapshot_available_query_rows = None
             isolated._preserve_read_transaction = False
             isolated.close()
 
@@ -2521,9 +2526,21 @@ class Database:
     ) -> dict[str, int]:
         """Read exact inventory using a short-lived connection."""
         isolated = self._isolated_database(busy_timeout_ms=_INTERACTIVE_DB_BUSY_TIMEOUT_MS)
+        isolated._preserve_read_transaction = True
         try:
-            return isolated.count_pool_readiness(xhs_self_nickname=xhs_self_nickname)
+            isolated.conn.execute("BEGIN")
+            isolated._snapshot_delight_thresholds = {}
+            isolated._snapshot_available_query_rows = {}
+            counts = isolated.count_pool_readiness(xhs_self_nickname=xhs_self_nickname)
+            isolated.conn.commit()
+            return counts
+        except Exception:
+            isolated.conn.rollback()
+            raise
         finally:
+            isolated._snapshot_delight_thresholds = None
+            isolated._snapshot_available_query_rows = None
+            isolated._preserve_read_transaction = False
             isolated.close()
 
     def load_pool_platform_availability(
@@ -2545,6 +2562,7 @@ class Database:
         try:
             isolated.conn.execute("BEGIN")
             isolated._snapshot_delight_thresholds = {}
+            isolated._snapshot_available_query_rows = {}
             viewed_content_keys, _ = isolated._seen_state_on(isolated.conn)
             rows = isolated._load_available_pool_candidate_rows_on(
                 isolated.conn,
@@ -2558,6 +2576,7 @@ class Database:
             raise
         finally:
             isolated._snapshot_delight_thresholds = None
+            isolated._snapshot_available_query_rows = None
             isolated._preserve_read_transaction = False
             isolated.close()
         counts: dict[str, int] = defaultdict(int)
@@ -7751,8 +7770,7 @@ class Database:
                 "temporal_evidence_complete"
             )
         )
-        cursor = conn.execute(
-            f"""
+        sql = f"""
             SELECT {projection}
             FROM content_cache
             WHERE COALESCE(pool_status, 'fresh') = 'fresh'
@@ -7779,10 +7797,19 @@ class Database:
                 last_scored_at DESC,
                 view_count DESC,
                 bvid ASC
-            """,
-            (*admission_params, *guard_params, delight_threshold),
-        )
-        rows = [dict(row) for row in cursor.fetchall()]
+            """
+        params = (*admission_params, *guard_params, delight_threshold)
+        # Only identical SQL inside the same isolated read transaction is
+        # reused. Time eligibility, viewed filtering and topic windows still
+        # run below on every call, with their original inputs and current time.
+        cache = self._snapshot_available_query_rows
+        key = (conn, sql, params)
+        cached = cache.get(key) if cache is not None else None
+        if cached is None:
+            cached = tuple(dict(row) for row in conn.execute(sql, params).fetchall())
+            if cache is not None:
+                cache[key] = cached
+        rows = list(cached)
         viewed_content_keys = (
             self._recent_viewed_content_keys_on(conn)
             if _viewed_content_keys is None

@@ -4924,6 +4924,11 @@ class RecommendationEngine:
             )
             return base + bonus.get(item.bvid, 0.0)
 
+        # Same vectors and cosine implementation throughout this selection.
+        # Cache exact pair results locally; never share scores across batches.
+        # Caps, relevance weights, tie order and fallback passes stay intact.
+        pair_similarity: dict[tuple[str, str], float] = {}
+
         def _max_cos_to_picked(
             cand: DiscoveredContent,
             picked: list[DiscoveredContent],
@@ -4936,7 +4941,11 @@ class RecommendationEngine:
                 p_vec = embeddings.get(p.bvid)
                 if not p_vec:
                     continue
-                sim = cosine_similarity(cand_vec, p_vec)
+                pair = (cand.bvid, p.bvid)
+                sim = pair_similarity.get(pair)
+                if sim is None:
+                    sim = cosine_similarity(cand_vec, p_vec)
+                    pair_similarity[pair] = sim
                 if sim > best:
                     best = sim
             return best

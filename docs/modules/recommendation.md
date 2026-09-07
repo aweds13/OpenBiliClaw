@@ -80,6 +80,7 @@ HTTPS URL。
 | v0.3.45 MMR embedding 提前 warm | ✅ | `warm_mmr_embeddings` 在 discovery 入池 + `classify_pool_backlog` 落库后立即并行 warm L2 SQLite embedding cache（cache key 文本由 `_mmr_embedding_text` 静态方法做 single source of truth），serve() 用 `asyncio.gather` 并行兜底,新增 `MMR embedding fetch: coverage=N/M elapsed=Xms` 埋点。换一批 P50 双峰（0.7s / 6-10s）收敛到稳定 <1s。v0.3.124+（lever 4）：冷启动伴侣 `prewarm_pool_mmr_embeddings()` 返回 `-1`＝没东西可暖(无 embedding service / 空池，良性)、`0`＝有候选但全嵌入失败(后端不可达)、`>0`＝已暖,供启动包装器区分良性冷启动与真故障 |
 | 换批默认硬去重 + 批次事件 | ✅ | 桌面 Web、移动 Web 与扩展 side panel 调用 `POST /api/recommendations/reshuffle` 时都会携带当前卡片 ID；桌面平台 Tab 还会排除该平台本会话已加载卡片。API/引擎把 `excluded_bvids` 贯穿到最终过滤，并把候选读取窗口扩大为基础窗口加排除数，避免旧卡因平台保底或 top-40 截断回流。成功换批只写一条 satisfaction-neutral、强度 `0.1` 的 `reshuffle` 批次事件，不再把整屏逐条伪装成 `dismiss`；误导性的“换一批时忽略当前”开关已移除。空响应或失败仍保留当前列表；CLI 是无持久卡片状态的单次输出，不适用列表保留语义。 |
 | issue #98 CPU 排序脱离事件循环 | ✅ | `_select_diversified_batch_async()` 与 `_build_supergroup_canonical_map_async()` 通过 `asyncio.to_thread()` 执行 MMR/多样性选择和 supergroup 两两 union-find；同步纯函数仍是唯一算法实现，异步包装保持完全相同的确定性输出。MMR 日志拆分 `selector_worker_ms` 与 `event_loop_resume_delay_ms`，不再把 worker 已完成后主协程迟迟未恢复的停顿误算成算法 CPU 时间。线程主要用于保持 asyncio 响应，不承诺绕过 Python GIL 提升吞吐。 |
+| 事务与批次内重复计算复用 | ✅ | MMR 在单次选择中复用原余弦函数对同一向量对的精确结果；每轮排序、上限、补满与交错顺序不变。存储原始查询复用只在当前只读事务生效，时效、已看与 topic window 仍逐次执行。固定历史与 48 组边界输入对照见 [性能验证](../verification/2026-09-08-recommendation-reuse.md) |
 | issue #98 SQLite 换批热路径 | ✅ | `PoolServeSnapshot` 在独立 serve DB worker 上先把 temporal `review_due` 的 `fresh` 行转为 `temporal_review_hold`、把 `expired` 行转为 `stale`，再用短生命周期连接、单个读事务统一读取 readiness、候选窗口、平台补位、`seen_items` 和 curator 信号；两类行都不展示、不计 canonical 库存。API 不再前置重复扫描库存。推荐历史写入与 `pool_status='shown'` 在同一独立短事务中原子提交，并在事务内对最终选中行重读完整证据组，避免 snapshot→persist 竞态把刚到复审点或刚确定过期的内容返回给用户。它和后台 maintenance worker/连接彻底分离；读取、维护或精确状态收敛期间 `/api/ping` / runtime stream 仍可响应。`recommendation_request_timing` 记录 profile/snapshot/embedding/selector/resume/persist/total 阶段，详细候选与 MMR 摘要只在 DEBUG 输出；`scripts/benchmark_reshuffle_latency.py` 使用独立预热的 health 连接并发验证尾延迟，避免 HTTP/1 客户端连接池串行化污染结果。 |
 | v0.3.57 pool gate on precomputed copy | ✅ | `get_pool_candidates` / `count_pool_candidates` SQL 加 `AND COALESCE(pool_expression, '') != '' AND COALESCE(pool_topic_label, '') != ''` —— 未 precompute 的 row 对 serve() 不可见,消除"discovery 完成→precompute 完成"60–90s 窗口内 popup 显示占位模板的旧 bug。`engine.py:320` 的 `_fallback_expression` 路径变成 race-window 安全网,触发即 `logger.warning("Pool gate leak: ...")` |
 | v0.3.66 pool gate on classification | ✅ | `get_pool_candidates` / `count_pool_candidates` 现在同样要求 `style_key` 与 `topic_group` 非空；`get_pool_candidates_needing_copy` 也只挑已分类但缺文案的候选，避免未分类跨源内容先生成 copy 后绕过 serve 分类口径 |
@@ -120,6 +121,8 @@ HTTPS URL。
 cover bonus 仍由前者单独控制。
 
 ## 公开 API
+
+2026-09-08：公开方法签名、候选窗口和返回协议不变；批次选择内部仅复用同一候选对的精确余弦值，下一批重新计算，完整多样性规则与补满流程保持不变。
 
 桌面 Web 的后台恢复、配置应用和状态水合在本地已有推荐卡片时只同步 runtime / 库存，跳过可能触发首屏 `serve()` 补池的 `GET /api/recommendations`；空列表首屏与用户明确手动刷新仍读取推荐快照。该边界不改变 `reshuffle` / `append` 的显式消费契约。
 

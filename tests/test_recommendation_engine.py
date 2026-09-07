@@ -6677,3 +6677,52 @@ async def test_worker_mode_serve_commits_before_return_and_ignores_stale_snapsho
         assert outbox.count() == 0
     finally:
         db.close()
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_mmr_reuses_each_cosine_pair_only_within_one_batch(monkeypatch, partial) -> None:
+    from collections import Counter
+
+    import openbiliclaw.llm.embedding as embedding_module
+
+    candidates = [
+        DiscoveredContent(
+            bvid=f"BVCOS{i}",
+            title=f"Content {i}",
+            source_strategy="search",
+            topic_group=f"topic-{i % 7}",
+            style_key=["deep_focus", "hands_on", "quick_scan"][i % 3],
+            relevance_score=0.9 - i * 0.001,
+        )
+        for i in range(30)
+    ]
+    embeddings = {
+        item.bvid: [0.0 if i % 4 == 0 else float(j == i % 16) for j in range(16)]
+        for i, item in enumerate(candidates)
+        if not partial or i % 3 != 0
+    }
+    calls: Counter[tuple[int, int]] = Counter()
+    original = embedding_module.cosine_similarity
+
+    def counted(a, b):
+        calls[(id(a), id(b))] += 1
+        return original(a, b)
+
+    monkeypatch.setattr(embedding_module, "cosine_similarity", counted)
+    first = RecommendationEngine._select_diversified_batch(
+        candidates,
+        limit=10,
+        embeddings=embeddings,
+    )
+    assert len(first) == 10
+    assert calls
+    assert max(calls.values()) == 1, "including zero similarity, repeated pairs are reused"
+    calls.clear()
+    second = RecommendationEngine._select_diversified_batch(
+        candidates,
+        limit=10,
+        embeddings=embeddings,
+    )
+    assert [item.bvid for item in second] == [item.bvid for item in first]
+    assert calls, "a later batch must calculate against its own vectors"
+    assert max(calls.values()) == 1
