@@ -342,3 +342,7 @@ popup、移动 Web 与桌面 Web 只有 durable 对话中的假设卡片保留 c
 | 跨进程广播 | socket 代理把成功响应库存桥接到主 API 的事件总线，补货变动由单个 app-owned 观察任务同步。 |
 
 `pool_status` 示例：`{"pool_available_count":26,"platform_available_counts":{"bilibili":20,"github":6},"pool_status_version":1788750000000}`。两个数量来自同一 canonical 查询；平台没有键即为零。客户端必须保留现有列表和最后一次成功库存，拒绝低版本响应覆盖。失败请求不会返回假推荐 ID 0。手机 Web 读完整 JSON 正文后才清理计时器，换批 / 追加均有 12 秒前端截止时间；失败保留卡片并恢复操作入口。
+
+### 活动动态的交互隔离（2026-09-07）
+
+已实现：`GET /api/activity-feed` 的 runtime、认知和数据库聚合在工作线程完成，异步锁串行进入既有 TTL 缓存，避免并发重复扫描真实候选历史阻塞主 HTTP 事件循环。公开响应结构不变。真实验收见 [报告](../verification/2026-09-07-recommendation-live.md)。

@@ -2006,6 +2006,7 @@ class Database:
         # filtering (discovery_candidates). None / empty = platform-neutral.
         self._source_publication_date_preferences: dict[str, Any] | None = None
         self._preserve_read_transaction = False
+        self._snapshot_delight_thresholds: dict[float, float] | None = None
         # The two queues must remain separate: a slow/background maintenance
         # batch must never sit in front of an interactive recommendation read.
         # Executors are lazy so short-lived CLI/tests that never use async DB
@@ -2394,6 +2395,7 @@ class Database:
         isolated._preserve_read_transaction = True
         try:
             isolated.conn.execute("BEGIN")
+            isolated._snapshot_delight_thresholds = {}
             # Materialize the canonical all-time seen ledger once and reuse it
             # across every availability/candidate helper in this transaction.
             viewed_content_keys, seen_bvids = isolated._seen_state_on(isolated.conn)
@@ -2493,6 +2495,7 @@ class Database:
             isolated.conn.rollback()
             raise
         finally:
+            isolated._snapshot_delight_thresholds = None
             isolated._preserve_read_transaction = False
             isolated.close()
 
@@ -2541,6 +2544,7 @@ class Database:
         isolated._preserve_read_transaction = True
         try:
             isolated.conn.execute("BEGIN")
+            isolated._snapshot_delight_thresholds = {}
             viewed_content_keys, _ = isolated._seen_state_on(isolated.conn)
             rows = isolated._load_available_pool_candidate_rows_on(
                 isolated.conn,
@@ -2553,6 +2557,7 @@ class Database:
             isolated.conn.rollback()
             raise
         finally:
+            isolated._snapshot_delight_thresholds = None
             isolated._preserve_read_transaction = False
             isolated.close()
         counts: dict[str, int] = defaultdict(int)
@@ -19986,7 +19991,23 @@ class Database:
         except (TypeError, ValueError):
             floor = _DELIGHT_CLAIM_MIN_SCORE
         floor = min(1.0, max(0.0, floor))
+        # Candidate, readiness and platform-floor queries share one immutable
+        # SQLite snapshot. Re-evaluating thousands of historical temporal rows
+        # for each helper adds seconds while producing the same threshold.
+        # The cache exists only inside that isolated read transaction and is
+        # discarded before close; the next request observes current writes.
+        cache = self._snapshot_delight_thresholds
+        if cache is not None and floor in cache:
+            return cache[floor]
+        value = self._compute_dynamic_delight_threshold_on(conn, floor=floor)
+        if cache is not None:
+            cache[floor] = value
+        return value
 
+    def _compute_dynamic_delight_threshold_on(
+        self, conn: sqlite3.Connection, *, floor: float
+    ) -> float:
+        """Calculate the percentile against the caller's current read snapshot."""
         cursor = conn.execute(
             f"""
             SELECT COALESCE(delight_score, 0.0) AS score,

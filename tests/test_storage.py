@@ -6931,3 +6931,28 @@ def test_feedback_signals_return_topic_key_and_group() -> None:
 
         assert rows[0]["topic_key"] == "动漫解说"
         assert rows[0]["topic_group"] == "动漫"
+
+
+def test_serve_snapshot_computes_delight_boundary_once_and_discards_it(tmp_path) -> None:
+    db = Database(tmp_path / "snapshot.db")
+    db.initialize()
+    _seed_visible(db, "BVBOUNDARY", title="current inventory", source="search")
+    original = Database._compute_dynamic_delight_threshold_on
+    calls = 0
+
+    def counted(database, conn, *, floor):
+        nonlocal calls
+        calls += 1
+        return original(database, conn, floor=floor)
+
+    try:
+        with patch.object(Database, "_compute_dynamic_delight_threshold_on", counted):
+            first = db.load_pool_serve_snapshot(limit=10)
+            assert first.readiness["available"] == 1
+            assert calls == 1
+            db.mark_pool_items_shown(["BVBOUNDARY"])
+            second = db.load_pool_serve_snapshot(limit=10)
+            assert second.readiness["available"] == 0
+            assert calls == 2, "a new transaction must recalculate against current inventory"
+    finally:
+        db.close()

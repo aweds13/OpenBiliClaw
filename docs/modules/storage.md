@@ -789,3 +789,7 @@ db.suppress_low_confidence_recommendations()
 9. **低分、待复审和确定过期都在正式推荐边界落地**：相关性 admission 与 temporal eligibility 由 discovery 的结构化结果决定；storage 复用确定性规则，阻止旧脏数据、suppressed 低分复活、raw 覆盖证据和未来绕过入口继续进入可展示读取路径。
 10. **keyword kind 是用途隔离，不是平台隔离**：`regular` 和 `explore` 共享同一张 `discovery_keywords` 表与生命周期，便于复用 claim / lease / yield 基础设施；但默认 claim / history / recycle 只读 `regular`，避免探索 query 被普通 search 提前消费或被常规补货历史污染。
 11. **`style_key` 迁移只改已知旧值**：历史安装用户的本地 SQLite 里可能已有 `deep_dive`、`story_doc`、`lifestyle` 等旧内容风格 key。初始化迁移会把这些已知值物理改写为 `deep_focus`、`story_immersion`、`daily_wander` 等新观看模式；未知自定义值会原样保留，避免误删无法识别的历史数据。
+
+### 推荐快照内阈值复用（2026-09-07）
+
+已实现：`load_pool_serve_snapshot()` / `load_pool_platform_availability()` 的隔离读取事务为动态 delight 阈值提供按 floor 区分的临时结果表，候选、库存及平台补位可复用同一读取快照的边界。事务结束立即丢弃，不跨请求缓存候选或库存；最终推荐提交继续验证当前资格。公开方法签名、数据库 schema 与配置均不变。

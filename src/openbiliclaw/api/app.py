@@ -2297,6 +2297,7 @@ def create_app(
     runtime_status_cache: RuntimeStatusResponse | None = None
     runtime_status_cached_at = 0.0
     activity_feed_cache: dict[tuple[int, str], tuple[float, ActivityFeedResponse]] = {}
+    activity_feed_lock = asyncio.Lock()
 
     def _invalidate_recommendation_snapshot() -> None:
         nonlocal recommendation_snapshot_cache, recommendation_snapshot_cached_at
@@ -9351,6 +9352,12 @@ def create_app(
         limit: int = 10,
         before: str = "",
     ) -> ActivityFeedResponse:
+        # Runtime diagnostics scan the real candidate history. Keep that work
+        # off the HTTP loop and coalesce concurrent clients behind the cache.
+        async with activity_feed_lock:
+            return await asyncio.to_thread(_build_activity_feed, limit, before)
+
+    def _build_activity_feed(limit: int, before: str) -> ActivityFeedResponse:
         nonlocal activity_feed_cache
         cache_key = (limit, before)
         now = time.monotonic()

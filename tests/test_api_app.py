@@ -22078,3 +22078,46 @@ async def test_recommendation_proxy_relays_inventory_to_main_event_hub(monkeypat
         event["platform_available_counts"]
         == response.json()["pool_status"]["platform_available_counts"]
     )
+
+
+async def test_activity_feed_diagnostics_yield_http_loop_and_coalesce(monkeypatch) -> None:
+    import threading
+
+    import httpx
+
+    from openbiliclaw.runtime.activity_feed import ActivityFeedBuilder
+
+    loop_thread = threading.get_ident()
+    started = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    def slow_runtime_status() -> dict[str, object]:
+        nonlocal calls
+        assert threading.get_ident() != loop_thread
+        calls += 1
+        started.set()
+        assert release.wait(3), "HTTP loop must remain free to release diagnostics"
+        return {"initialized": True}
+
+    monkeypatch.setattr(ActivityFeedBuilder, "build", lambda self, **kwargs: {"items": []})
+    app = create_app(
+        database=SimpleNamespace(),
+        memory_manager=SimpleNamespace(),
+        soul_engine=object(),
+        runtime_controller=SimpleNamespace(get_runtime_status=slow_runtime_status),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+    ) as client:
+        first = asyncio.create_task(client.get("/api/activity-feed"))
+        second = asyncio.create_task(client.get("/api/activity-feed"))
+        try:
+            assert await asyncio.to_thread(started.wait, 1)
+            health = await asyncio.wait_for(client.get("/api/health"), timeout=1)
+            assert health.status_code == 200
+        finally:
+            release.set()
+        responses = await asyncio.gather(first, second)
+    assert all(response.status_code == 200 for response in responses)
+    assert calls == 1
