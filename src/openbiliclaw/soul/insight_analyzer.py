@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 # Default production dedup similarity. Calibrated to collapse obvious wording
 # variants without merging distinct directions; can be tuned if users want
 # even tighter integration.
-_INSIGHT_DEDUP_SIMILARITY_THRESHOLD = 0.70
+_INSIGHT_DEDUP_SIMILARITY_THRESHOLD = 0.65
 
 
 class SupportsCoreMemoryTask(Protocol):

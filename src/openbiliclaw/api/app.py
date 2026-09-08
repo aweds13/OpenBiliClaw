@@ -393,7 +393,7 @@ _PENDING_CONFIRMATION_LIMIT = 10
 # titles (e.g. the same hypothesis generated with slightly different wording).
 # Manual opens still resolve by exact ref, so keeping the strongest copy in the
 # list is safe.
-_PENDING_DEDUP_SIMILARITY_THRESHOLD = 0.80
+_PENDING_DEDUP_SIMILARITY_THRESHOLD = 0.65
 # Short titles are mostly test/fixture strings or generic labels; comparing
 # them by character overlap collapses distinct hypotheses too aggressively.
 _PENDING_DEDUP_MIN_TITLE_LENGTH = 20

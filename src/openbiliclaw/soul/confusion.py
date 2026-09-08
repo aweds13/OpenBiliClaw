@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # flood the ask budget; first-round recalibration flagged (pitfall #3).
 MAX_CONFUSION_CANDIDATES_PER_ROUND = 2
 # Near-duplicate confusion detection at production time.
-_CONFUSION_DEDUP_SIMILARITY_THRESHOLD = 0.70
+_CONFUSION_DEDUP_SIMILARITY_THRESHOLD = 0.65
 _CONFUSION_DEDUP_MIN_TEXT_LENGTH = 20
 # Ask cooldown: once a confusion has been asked, do not re-ask for 72h. Persisted
 # in the row (``asked_at``) so it survives restarts. Calibrated to the single-user
