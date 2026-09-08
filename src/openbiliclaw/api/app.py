@@ -3653,7 +3653,7 @@ def create_app(
                 if str(value).strip()
             ],
             "confidence": confidence,
-            "created_at": "",
+            "created_at": str(getattr(confusion, "created_at", "") or "").strip(),
             "status": str(getattr(confusion, "status", "") or "").strip().lower(),
         }
 
@@ -3697,9 +3697,11 @@ def create_app(
         *,
         session: str = "",
     ) -> list[dict[str, Any]]:
-        def rank(item: dict[str, Any]) -> tuple[float, int, str]:
+        def rank(item: dict[str, Any]) -> tuple[str, float, int, str]:
+            created_at = str(item.get("created_at", "") or "").strip() or "0000-00-00"
             return (
-                -float(item.get("confidence", 0.0) or 0.0),
+                created_at,
+                float(item.get("confidence", 0.0) or 0.0),
                 0 if item.get("kind") == "confusion" else 1,
                 str(item.get("ref", "")),
             )
@@ -3756,7 +3758,7 @@ def create_app(
         # Deduplicate each kind separately so a hypothesis can never be
         # collapsed into a semantically different confusion.
         deduped_hypotheses = _dedupe_pending_confirmations(
-            sorted(hypotheses, key=rank),
+            sorted(hypotheses, key=rank, reverse=True),
         )
         if normalized_session:
             # Once this session already has a live confirmation card/question
@@ -3773,10 +3775,10 @@ def create_app(
                 is None
             ]
         deduped_confusions = _dedupe_pending_confirmations(
-            sorted(confusions, key=rank),
+            sorted(confusions, key=rank, reverse=True),
         )
         candidates = deduped_hypotheses + deduped_confusions
-        candidates.sort(key=rank)
+        candidates.sort(key=rank, reverse=True)
         return candidates
 
     def _pending_confirmation_items(
@@ -3785,9 +3787,11 @@ def create_app(
         session: str = "",
         candidates: list[dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
-        def rank(item: dict[str, Any]) -> tuple[float, int, str]:
+        def rank(item: dict[str, Any]) -> tuple[str, float, int, str]:
+            created_at = str(item.get("created_at", "") or "").strip() or "0000-00-00"
             return (
-                -float(item.get("confidence", 0.0) or 0.0),
+                created_at,
+                float(item.get("confidence", 0.0) or 0.0),
                 0 if item.get("kind") == "confusion" else 1,
                 str(item.get("ref", "")),
             )
@@ -3808,7 +3812,7 @@ def create_app(
         picked += hypotheses[: capacity - len(picked)]
         if len(picked) < capacity:
             picked += confusions[reserved : reserved + (capacity - len(picked))]
-        picked.sort(key=rank)
+        picked.sort(key=rank, reverse=True)
         return picked
 
     def _pending_confirmation_by_ref(ref: str) -> dict[str, Any] | None:

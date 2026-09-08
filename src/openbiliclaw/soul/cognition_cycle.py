@@ -57,6 +57,8 @@ logger = logging.getLogger(__name__)
 
 # Default throttle: generate awareness+insight once every 12 hours.
 DEFAULT_MIN_INTERVAL_SECONDS = 12 * 60 * 60
+# Daily cleanup of stale duplicate hypotheses / open confusions.
+CLEANUP_INTERVAL_SECONDS = 24 * 60 * 60
 
 # --- Cursor-based incremental reads (replaces the old fixed limit=50) ----
 # Awareness reads events with id > last_awareness_event_id rather than the
@@ -290,6 +292,18 @@ class CognitionCycle:
 
         last_awareness_at = _parse_iso(state.get("last_awareness_at"))
         last_insight_at = _parse_iso(state.get("last_insight_at"))
+
+        cleanup_due = self._is_due(
+            _parse_iso(state.get("last_cleanup_at")),
+            current_time,
+        )
+        if cleanup_due:
+            try:
+                self._cleanup_stale_pending()
+                state["last_cleanup_at"] = current_time.isoformat()
+                self._save_state(state)
+            except Exception:
+                logger.debug("Stale pending cleanup failed", exc_info=True)
 
         awareness_due = self._is_due(last_awareness_at, current_time)
         insight_due = self._is_due(last_insight_at, current_time)
@@ -584,6 +598,56 @@ class CognitionCycle:
             state["last_insight_awareness_index"] = processed
             self._save_state(state)
         return total_added
+
+    def _cleanup_stale_pending(self) -> None:
+        """Daily dedup of hypotheses and duplicate open confusions.
+
+        Runs regardless of whether awareness/insight LLM work is due, so the
+        queue stays small even on quiet days.  Confirmation history is only
+        downgraded (dismissed), never deleted.
+        """
+        # 1. Collapse duplicate hypotheses in the insight layer.
+        try:
+            insights = self._load_insights()
+            from openbiliclaw.soul.insight_analyzer import InsightAnalyzer
+
+            deduped = InsightAnalyzer.dedupe_hypotheses(insights)
+            if len(deduped) != len(insights):
+                self._save_insights(deduped)
+        except Exception:
+            logger.debug("Daily insight dedup sweep failed", exc_info=True)
+
+        # 2. Dismiss duplicate open confusions, keeping the newest/first row.
+        try:
+            db = getattr(self._memory, "_database", None)
+            if db is None:
+                return
+            manager = self._confusion_manager()
+            rows = db.list_confusions(statuses=["open"], limit=10000)
+            active = [
+                {
+                    "id": int(row.get("id", 0) or 0),
+                    "status": str(row.get("status", "") or "").strip().lower(),
+                    "topic": str(row.get("topic", "") or "").strip(),
+                    "observation": str(row.get("observation", "") or "").strip(),
+                    "interpretation": str(row.get("interpretation", "") or "").strip(),
+                }
+                for row in rows
+            ]
+            kept: list[dict[str, Any]] = []
+            for cand in active:
+                if any(manager._same_confusion(cand, item) for item in kept):
+                    db.update_confusion(
+                        int(cand["id"]),
+                        status="dismissed",
+                        resolved_at=datetime.now().astimezone().isoformat(),
+                        resolution_note="daily cleanup duplicate",
+                    )
+                else:
+                    kept.append(cand)
+        except Exception:
+            logger.debug("Daily confusion dedup sweep failed", exc_info=True)
+
 
     def _sync_to_profile(self, result: CognitionCycleResult) -> None:
         """Copy the freshest awareness/insights into the OnionProfile.

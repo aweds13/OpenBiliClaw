@@ -130,6 +130,7 @@ class Confusion:
     """In-memory view of a ``confusions`` row."""
 
     id: int
+    created_at: str = ""
     status: str = "open"
     source: str = ""
     topic: str = ""
@@ -157,6 +158,7 @@ class Confusion:
         refs = [str(r) for r in row.get("evidence_refs", []) if str(r)]
         return cls(
             id=int(row.get("id", 0)),
+            created_at=str(row.get("created_at", "") or ""),
             status=str(row.get("status", "open") or "open"),
             source=str(row.get("source", "") or ""),
             topic=str(row.get("topic", "") or ""),
