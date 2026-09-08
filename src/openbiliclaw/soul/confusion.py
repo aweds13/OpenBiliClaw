@@ -29,8 +29,8 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
-from difflib import SequenceMatcher
 from datetime import datetime, timedelta
+from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -233,9 +233,12 @@ class ConfusionManager:
         nb = cls._dedupe_norm_text(right_observation)
         if na == nb:
             return True
-        if len(na) >= _CONFUSION_DEDUP_MIN_TEXT_LENGTH and len(nb) >= _CONFUSION_DEDUP_MIN_TEXT_LENGTH:
-            if SequenceMatcher(None, na, nb).ratio() >= _CONFUSION_DEDUP_SIMILARITY_THRESHOLD:
-                return True
+        if (
+            len(na) >= _CONFUSION_DEDUP_MIN_TEXT_LENGTH
+            and len(nb) >= _CONFUSION_DEDUP_MIN_TEXT_LENGTH
+            and SequenceMatcher(None, na, nb).ratio() >= _CONFUSION_DEDUP_SIMILARITY_THRESHOLD
+        ):
+            return True
         # A long, specific topic plus similar observation is stronger evidence;
         # short topics alone never decide by themselves.
         if left_topic and right_topic:
