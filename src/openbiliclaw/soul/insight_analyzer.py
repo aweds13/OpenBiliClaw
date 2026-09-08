@@ -25,6 +25,11 @@ from .profile import AwarenessNote, InsightHypothesis
 
 logger = logging.getLogger(__name__)
 
+# Default production dedup similarity. Calibrated to collapse obvious wording
+# variants without merging distinct directions; can be tuned if users want
+# even tighter integration.
+_INSIGHT_DEDUP_SIMILARITY_THRESHOLD = 0.70
+
 
 class SupportsCoreMemoryTask(Protocol):
     async def complete_structured_task(
@@ -136,7 +141,10 @@ class InsightAnalyzer:
         # Keep short labels apart; they are usually deliberate distinct topics.
         if len(left) < 20 or len(right) < 20:
             return False
-        return SequenceMatcher(None, left, right).ratio() >= 0.80
+        return (
+            SequenceMatcher(None, left, right).ratio()
+            >= _INSIGHT_DEDUP_SIMILARITY_THRESHOLD
+        )
 
     @classmethod
     def dedupe_hypotheses(

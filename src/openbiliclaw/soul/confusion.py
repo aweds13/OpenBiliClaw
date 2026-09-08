@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # flood the ask budget; first-round recalibration flagged (pitfall #3).
 MAX_CONFUSION_CANDIDATES_PER_ROUND = 2
 # Near-duplicate confusion detection at production time.
-_CONFUSION_DEDUP_SIMILARITY_THRESHOLD = 0.80
+_CONFUSION_DEDUP_SIMILARITY_THRESHOLD = 0.70
 _CONFUSION_DEDUP_MIN_TEXT_LENGTH = 20
 # Ask cooldown: once a confusion has been asked, do not re-ask for 72h. Persisted
 # in the row (``asked_at``) so it survives restarts. Calibrated to the single-user
@@ -215,21 +215,38 @@ class ConfusionManager:
 
     @classmethod
     def _same_confusion(cls, left: dict[str, Any], right: dict[str, Any]) -> bool:
-        """Whether two confusion candidates refer to the same ambiguity."""
-        pairs = (
-            (str(left.get("topic", "")).strip(), str(right.get("topic", "")).strip()),
-            (str(left.get("observation", "")).strip(), str(right.get("observation", "")).strip()),
-        )
-        for a, b in pairs:
-            if not a or not b:
-                continue
-            na = cls._dedupe_norm_text(a)
-            nb = cls._dedupe_norm_text(b)
-            if na == nb:
-                return True
-            if len(na) < _CONFUSION_DEDUP_MIN_TEXT_LENGTH or len(nb) < _CONFUSION_DEDUP_MIN_TEXT_LENGTH:
-                continue
+        """Whether two confusion candidates refer to the same ambiguity.
+
+        Observation is the primary signal; matching on topic alone is too
+        coarse because a short topic like "解压视频" can cover several
+        genuinely different ambiguous behaviours.
+        """
+        left_observation = str(left.get("observation", "")).strip()
+        right_observation = str(right.get("observation", "")).strip()
+        left_topic = str(left.get("topic", "")).strip()
+        right_topic = str(right.get("topic", "")).strip()
+        if not left_observation or not right_observation:
+            return False
+        na = cls._dedupe_norm_text(left_observation)
+        nb = cls._dedupe_norm_text(right_observation)
+        if na == nb:
+            return True
+        if len(na) >= _CONFUSION_DEDUP_MIN_TEXT_LENGTH and len(nb) >= _CONFUSION_DEDUP_MIN_TEXT_LENGTH:
             if SequenceMatcher(None, na, nb).ratio() >= _CONFUSION_DEDUP_SIMILARITY_THRESHOLD:
+                return True
+        # A long, specific topic plus similar observation is stronger evidence;
+        # short topics alone never decide by themselves.
+        if left_topic and right_topic:
+            ta = cls._dedupe_norm_text(left_topic)
+            tb = cls._dedupe_norm_text(right_topic)
+            if (
+                len(ta) >= _CONFUSION_DEDUP_MIN_TEXT_LENGTH
+                and len(tb) >= _CONFUSION_DEDUP_MIN_TEXT_LENGTH
+                and SequenceMatcher(None, ta, tb).ratio()
+                >= _CONFUSION_DEDUP_SIMILARITY_THRESHOLD
+                and cls._dedupe_norm_text(left_observation)
+                == cls._dedupe_norm_text(right_observation)
+            ):
                 return True
         return False
 
