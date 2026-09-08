@@ -384,10 +384,19 @@ _TERMINAL_CARD_STATES = frozenset({"confirmed", "rejected", "revised"})
 # First-round calibration (2026-07-22): 0.60 is the lower edge at which an
 # unvalidated hypothesis is concrete enough to ask about; open confusions use
 # 0.50 because their explicit contradiction is already stronger evidence.
-# The badge/list is deliberately capped at three to keep the entry lightweight.
+# The badge/list is deliberately capped at ten to keep the entry readable,
+# while `total` still reports the full deduplicated backlog.
 _PENDING_HYPOTHESIS_MIN_CONFIDENCE = 0.60
 _PENDING_CONFUSION_MIN_CONFIDENCE = 0.50
-_PENDING_CONFIRMATION_LIMIT = 3
+_PENDING_CONFIRMATION_LIMIT = 10
+# Similarity threshold used to collapse near-duplicate pending confirmation
+# titles (e.g. the same hypothesis generated with slightly different wording).
+# Manual opens still resolve by exact ref, so keeping the strongest copy in the
+# list is safe.
+_PENDING_DEDUP_SIMILARITY_THRESHOLD = 0.80
+# Short titles are mostly test/fixture strings or generic labels; comparing
+# them by character overlap collapses distinct hypotheses too aggressively.
+_PENDING_DEDUP_MIN_TITLE_LENGTH = 20
 # Issue #213: a ``no_provider`` failure is config-shaped (empty resolved module
 # route / global chain), so retrying it forever only parks the durable turn on
 # the infinite "thinking" spinner and head-of-line blocks every later turn.
@@ -3648,9 +3657,44 @@ def create_app(
             "status": str(getattr(confusion, "status", "") or "").strip().lower(),
         }
 
-    def _pending_confirmation_items(
+    def _pending_norm_title(value: object) -> str:
+        return re.sub(r"[\W_]+", "", str(value or "")).lower()
+
+    def _dedupe_pending_confirmations(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Collapse pending titles that differ only by wording.
+
+        The insight pipeline independently produces many hypotheses that are
+        near-copies of each other with small wording changes (e.g. the same
+        Douyin observation with 等待状态 / 等待间隙 / 低能量状态).  Keep the
+        first/highest-ranked copy and drop later near-duplicates.  Manual open
+        still resolves by exact ref, so this only affects the lightweight list.
+        """
+        if len(items) < 2:
+            return list(items)
+        from difflib import SequenceMatcher
+
+        kept: list[dict[str, Any]] = []
+        seen_titles: list[str] = []
+        for item in items:
+            normalized_title = _pending_norm_title(item.get("title", ""))
+            # Short titles are usually synthetic test labels; applying the
+            # sequence matcher there would collapse "高优先假设一/二/三".
+            if not normalized_title or len(normalized_title) < _PENDING_DEDUP_MIN_TITLE_LENGTH:
+                kept.append(item)
+                continue
+            if any(
+                len(seen) >= _PENDING_DEDUP_MIN_TITLE_LENGTH
+                and SequenceMatcher(None, normalized_title, seen).ratio()
+                >= _PENDING_DEDUP_SIMILARITY_THRESHOLD
+                for seen in seen_titles
+            ):
+                continue
+            seen_titles.append(normalized_title)
+            kept.append(item)
+        return kept
+
+    def _pending_confirmation_candidates(
         *,
-        limit: int,
         session: str = "",
     ) -> list[dict[str, Any]]:
         def rank(item: dict[str, Any]) -> tuple[float, int, str]:
@@ -3662,10 +3706,16 @@ def create_app(
 
         confirmation_state = _load_dialogue_confirmation_state()
         now = datetime.now(UTC)
+        normalized_session = session.strip()
         hypotheses = [
             item
-            for item in sorted(_hypothesis_confirmation_items(), key=rank)
+            for item in _hypothesis_confirmation_items()
             if not _is_confirmation_deferred(
+                confirmation_state,
+                ref=item["ref"],
+                now=now,
+            )
+            and _system_confirmation_object_ready(
                 confirmation_state,
                 ref=item["ref"],
                 now=now,
@@ -3693,7 +3743,6 @@ def create_app(
         if confusions and confusions[0].get("status") == "clarifying":
             active = confusions[0]
             active_ref = str(active.get("ref", ""))
-            normalized_session = session.strip()
             already_visible = bool(
                 normalized_session
                 and _get_chat_confirmation_turn(
@@ -3704,7 +3753,53 @@ def create_app(
             )
             confusions = [] if already_visible else [active]
 
+        # Deduplicate each kind separately so a hypothesis can never be
+        # collapsed into a semantically different confusion.
+        deduped_hypotheses = _dedupe_pending_confirmations(
+            sorted(hypotheses, key=rank),
+        )
+        if normalized_session:
+            # Once this session already has a live confirmation card/question
+            # for a ref, showing it again in the pending list only looks like a
+            # duplicate of the item the user is already looking at.  Dedup runs
+            # first so an open representative also hides its near-duplicates.
+            deduped_hypotheses = [
+                item
+                for item in deduped_hypotheses
+                if _get_chat_confirmation_turn(
+                    ref=item["ref"],
+                    session=normalized_session,
+                )
+                is None
+            ]
+        deduped_confusions = _dedupe_pending_confirmations(
+            sorted(confusions, key=rank),
+        )
+        candidates = deduped_hypotheses + deduped_confusions
+        candidates.sort(key=rank)
+        return candidates
+
+    def _pending_confirmation_items(
+        *,
+        limit: int,
+        session: str = "",
+        candidates: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        def rank(item: dict[str, Any]) -> tuple[float, int, str]:
+            return (
+                -float(item.get("confidence", 0.0) or 0.0),
+                0 if item.get("kind") == "confusion" else 1,
+                str(item.get("ref", "")),
+            )
+
+        if candidates is None:
+            candidates = _pending_confirmation_candidates(session=session)
         capacity = max(0, int(limit))
+        if capacity <= 0:
+            return []
+        confusions = [item for item in candidates if item.get("kind") == "confusion"]
+        hypotheses = [item for item in candidates if item.get("kind") != "confusion"]
+
         # Reserve seats for confusions first (see _PENDING_CONFUSION_RESERVED_SLOTS
         # for why a single descending sort starves them), then fill the rest with
         # hypotheses, then hand any still-unused capacity back to the other kind.
@@ -12417,13 +12512,18 @@ def create_app(
         # be reconciled on the next idle read/open instead of blocking the UI.
         if _dialogue_queue_ready_for_interactive_submission():
             await _reconcile_orphan_confusion_claims()
+        candidates = _pending_confirmation_candidates(session=session)
         items = _pending_confirmation_items(
             limit=_PENDING_CONFIRMATION_LIMIT,
             session=session,
+            candidates=candidates,
         )
+        total = len(candidates)
         if count_only:
-            return {"count": len(items)}
-        return {"count": len(items), "items": items}
+            # Keep `count` as the list length for compatibility; `total` is the
+            # full deduped backlog count the badge can opt into.
+            return {"count": len(items), "total": total}
+        return {"count": len(items), "items": items, "total": total}
 
     @app.post("/api/chat/pending-confirmations/{ref}/open", response_model=ChatTurnOut)
     async def open_pending_confirmation(

@@ -7558,7 +7558,7 @@ ${cardFeedbackBarHtml()}`;
       );
       state.pendingConfirmations = {
         ...state.pendingConfirmations,
-        count: Math.max(0, Number(payload?.count) || 0),
+        count: Math.max(0, Number(payload?.total ?? payload?.count) || 0),
         items: asArray(payload?.items)
       };
       renderDesktopPendingConfirmations();

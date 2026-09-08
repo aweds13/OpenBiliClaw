@@ -6,6 +6,8 @@
 
 ## v0.3.218：Latest Release 版本确认（2026-09-04）
 
+- **待聊确认列表扩容与去重（issue #233，2026-09-08）**：`/api/chat/pending-confirmations` 的列表上限从 3 条提高到 10 条，并新增 `total` 返回去重后的完整积压数；插件、桌面 Web、移动 Web 的角标改用 `total`，不再被“Top-3 补位”误导。列表按标题归一化相似度折叠近似重复的假设/疑惑，同 session 已打开未结算的条目不重复计入；已进入对象 72 小时冷却的最近问过条目也不会再次出现在待聊列表。同时在洞察生产阶段（`InsightAnalyzer.merge_insights` 与 `SoulEngine._save_insights`）就按归一化相似度合并近似重复假设，避免新的重复持续写入 `insight.json`；确认/拒绝/未评价等不同语义状态仍分开保留。Awareness 生成疑惑时也会对比已有 open/clarifying 疑惑，绕过近似重复的 `topic / observation`，不再每轮重复创建同一条疑惑。手动 `open` 仍绕过冷却，不会影响用户主动打开。
+
 - **惊喜队列阻塞修复合并收尾（2026-09-08）**：`db9667ab` 合入 main；本机完整服务从 main 加载补修，验证接口就绪后清理本次 worktree，沿用原配置和数据。
 
 - **修复推荐页并发读取阻塞（2026-09-08）**：手机刷新同时调用的惊喜队列接口改为线程池读取；保留动态阈值与完整筛选，避免同步历史扫描占住主 API 并拖慢换批转发；[定位与验证](verification/2026-09-08-delight-read-isolation.md)。

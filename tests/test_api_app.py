@@ -14083,7 +14083,7 @@ class TestPendingDialogueConfirmations:
             },
         )
 
-    def test_pending_list_filters_high_priority_caps_three_and_has_count_only(
+    def test_pending_list_filters_high_priority_caps_at_ten_and_has_count_only(
         self,
         tmp_path: Path,
     ) -> None:
@@ -14123,15 +14123,15 @@ class TestPendingDialogueConfirmations:
 
         assert response.status_code == 200
         body = response.json()
-        assert body["count"] == 3
-        assert len(body["items"]) == 3
+        assert body["count"] == 5
+        assert len(body["items"]) == 5
         refs = {item["ref"] for item in body["items"]}
         assert str(confusion_id) in refs
         assert refs <= high_refs | {str(confusion_id)}
         assert low_ref not in refs
         assert validated_ref not in refs
         assert count.status_code == 200
-        assert count.json() == {"count": 3}
+        assert count.json() == {"count": 5, "total": 5}
 
     def test_confusion_keeps_a_seat_when_every_hypothesis_scores_higher(
         self,
@@ -14148,7 +14148,7 @@ class TestPendingDialogueConfirmations:
         confusions land around 0.3–0.5.
         """
         client, memory, _engine, _dialogue = self._build(tmp_path)
-        for index in range(6):
+        for index in range(12):
             self._seed_hypothesis(memory, f"高置信假设-{index}", 0.90 - index / 100)
         confusion_id = memory._database.insert_confusion(
             source="awareness",
@@ -14159,25 +14159,110 @@ class TestPendingDialogueConfirmations:
 
         body = client.get("/api/chat/pending-confirmations").json()
 
-        assert body["count"] == 3
+        assert body["count"] == 10
         refs = [item["ref"] for item in body["items"]]
         assert str(confusion_id) in refs, (
             "the confusion holds a reserved seat despite scoring lowest"
         )
         kinds = [item["kind"] for item in body["items"]]
         assert kinds.count("confusion") == 1, "exactly one seat is reserved, not more"
-        assert kinds.count("hypothesis") == 2, "the remaining seats still go to hypotheses"
+        assert kinds.count("hypothesis") == 9, "the remaining seats still go to hypotheses"
 
     def test_unused_confusion_seat_falls_back_to_hypotheses(self, tmp_path: Path) -> None:
         """With no confusion pending, the reserved seat must not be wasted."""
         client, memory, _engine, _dialogue = self._build(tmp_path)
-        for index in range(5):
+        for index in range(12):
             self._seed_hypothesis(memory, f"只有假设-{index}", 0.90 - index / 100)
 
         body = client.get("/api/chat/pending-confirmations").json()
 
-        assert body["count"] == 3
+        assert body["count"] == 10
         assert all(item["kind"] == "hypothesis" for item in body["items"])
+
+    def test_pending_dedup_collapses_near_duplicate_titles(self, tmp_path: Path) -> None:
+        client, memory, _engine, _dialogue = self._build(tmp_path)
+        high_ref = self._seed_hypothesis(
+            memory,
+            "用户很可能将抖音作为习惯性界面操作而非内容消费渠道，用于消遣或等待状态",
+            0.90,
+        )
+        near_dup_ref = self._seed_hypothesis(
+            memory,
+            "用户很可能将抖音作为习惯性界面操作而非内容消费渠道，用于消遣、等待间隙或低能量状态",
+            0.89,
+        )
+
+        body = client.get("/api/chat/pending-confirmations").json()
+
+        assert body["total"] == 1
+        assert body["count"] == 1
+        assert [item["ref"] for item in body["items"]] == [high_ref]
+        assert near_dup_ref not in {item["ref"] for item in body["items"]}
+
+    def test_pending_excludes_same_session_open_turn(self, tmp_path: Path) -> None:
+        client, memory, _engine, _dialogue = self._build(tmp_path)
+        ref = self._seed_hypothesis(memory, "用户对长内容可能追求完整因果链而非结论摘要", 0.75)
+
+        before = client.get(
+            "/api/chat/pending-confirmations",
+            params={"session": "popup"},
+        ).json()
+        assert ref in {item["ref"] for item in before["items"]}
+
+        opened = client.post(
+            f"/api/chat/pending-confirmations/{ref}/open",
+            json={"session": "popup"},
+        )
+        assert opened.status_code == 200
+
+        popup = client.get(
+            "/api/chat/pending-confirmations",
+            params={"session": "popup"},
+        ).json()
+        assert ref not in {item["ref"] for item in popup["items"]}
+        assert popup["total"] == 0
+
+        webui = client.get(
+            "/api/chat/pending-confirmations",
+            params={"session": "webui"},
+        ).json()
+        assert ref in {item["ref"] for item in webui["items"]}
+
+    def test_pending_excludes_recently_asked_within_object_cooldown(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        client, memory, _engine, _dialogue = self._build(tmp_path)
+        ref = self._seed_hypothesis(memory, "用户对AI工具可能更看重实测与边界而不是新闻概念", 0.80)
+        state_path = memory._data_dir / "memory" / "dialogue_confirmation_state.json"
+        state_path.write_text(
+            json.dumps(
+                {
+                    "global_last_thrown_at": datetime.now(UTC).isoformat(),
+                    "objects": {
+                        ref: {
+                            "last_asked_at": datetime.now(UTC).isoformat(),
+                            "deferred_until": "",
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        recent = client.get("/api/chat/pending-confirmations").json()
+        assert recent["total"] == 0
+        assert recent["items"] == []
+
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["objects"][ref]["last_asked_at"] = (
+            datetime.now(UTC) - timedelta(hours=73)
+        ).isoformat()
+        state_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
+
+        expired = client.get("/api/chat/pending-confirmations").json()
+        assert expired["total"] == 1
+        assert [item["ref"] for item in expired["items"]] == [ref]
 
     def test_manual_open_three_items_ignores_both_cooldowns(self, tmp_path: Path) -> None:
         client, memory, _engine, _dialogue = self._build(tmp_path)

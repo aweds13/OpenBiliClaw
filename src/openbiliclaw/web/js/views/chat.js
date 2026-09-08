@@ -555,7 +555,7 @@ export async function refreshPendingConfirmations({ renderNow = true } = {}) {
   }
   try {
     const payload = await fetchPendingConfirmations({ session: "popup" });
-    const count = Math.max(0, Number(payload?.count) || 0);
+    const count = Math.max(0, Number(payload?.total ?? payload?.count) || 0);
     pendingConfirmations = {
       ...pendingConfirmations,
       count,
@@ -913,7 +913,7 @@ async function loadHistory() {
     if (pendingResult.status === "fulfilled") {
       const payload = pendingResult.value;
       const nextPending = {
-        count: Math.max(0, Number(payload?.count) || 0),
+        count: Math.max(0, Number(payload?.total ?? payload?.count) || 0),
         items: Array.isArray(payload?.items) ? payload.items : [],
       };
       if (

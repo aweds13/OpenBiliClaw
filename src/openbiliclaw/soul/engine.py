@@ -3859,6 +3859,10 @@ class SoulEngine:
         return [insight_hypothesis_from_dict(item) for item in hypotheses if isinstance(item, dict)]
 
     def _save_insights(self, insights: list[InsightHypothesis]) -> None:
+        # Enforce production-stage deduplication at every persistence boundary.
+        # Exact same-state duplicates and same-state near-duplicates collapse;
+        # confirmed/rejected/unjudged variants remain separate.
+        insights = InsightAnalyzer.dedupe_hypotheses(insights)
         layer = self._memory.get_layer("insight")
         layer.data.clear()
         layer.data.update({"hypotheses": [insight_hypothesis_to_dict(item) for item in insights]})
