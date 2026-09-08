@@ -155,7 +155,7 @@ durable turn → 固定时间/payload → 确认入口（待聊列表/卡片） 
 ### 推荐交互一致性
 
 ```text
-recommendation request → main API → optional Unix-socket recommendation process
+recommendation request → main API → default Unix-socket recommendation process
                                   → current SQLite snapshot → full ranking worker
                                   → atomic history + shown COMMIT → cards + exact platform inventory
 main API ← validated response inventory / 2s active-client inventory watcher

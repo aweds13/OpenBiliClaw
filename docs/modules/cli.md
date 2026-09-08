@@ -349,6 +349,8 @@ $ openbiliclaw start --host 0.0.0.0 --port 9000
 
 适合本地直接运行或调试场景。若只希望本机访问，把 `[api].host` 改为 `127.0.0.1`，或启动时传 `--host 127.0.0.1`。
 
+默认使用四进程后台模式：主 API 之外会拉起 `full worker`、`discovery worker`、独立推荐进程和独立图片代理。需要回退到旧的单 API 进程模式时，设置 `OPENBILICLAW_WORKER=0`（`false` / `no` / `off` 也可）。
+
 `start` 与 `serve-api` 都会先取得项目根和 canonical `data_dir` 的 migration runtime lock；如果存在已校验的 pending 或未完成 journal，会在任何业务数据库访问前完成应用或恢复。锁会持续到后端退出，另一个指向同一数据目录的受支持后端无法并发启动。迁移应用后会重新读取配置并补锁实际运行目录；无法取得任一锁时拒绝启动。
 
 随后 `start` 会按固定顺序做两件事：

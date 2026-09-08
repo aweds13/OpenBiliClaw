@@ -207,6 +207,8 @@ def test_run_api_server_stops_tailnet_helper_after_uvicorn_returns(
     stopped: list[bool] = []
     supervisor = SimpleNamespace(stop=lambda: stopped.append(True))
     app = SimpleNamespace(state=SimpleNamespace(degraded=False))
+    # Keep this unit test free of the default four-process worker children.
+    monkeypatch.setenv("OPENBILICLAW_WORKER", "0")
 
     monkeypatch.setattr(api_app_module, "create_app", lambda: app)
     monkeypatch.setattr(config_module, "load_config", Config)

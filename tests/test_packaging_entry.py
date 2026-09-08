@@ -680,6 +680,25 @@ def test_main_uses_configured_api_host_when_env_host_unset(
     monkeypatch.delenv("OPENBILICLAW_HOST", raising=False)
     monkeypatch.delenv("OPENBILICLAW_PORT", raising=False)
     monkeypatch.delenv("OPENBILICLAW_SELFTEST", raising=False)
+    # These packaging unit tests do not exercise the default four-process
+    # backend children; keep them in legacy no-worker mode.
+    monkeypatch.setenv("OPENBILICLAW_WORKER", "0")
+
+    class _DummyProc:
+        def terminate(self) -> None:
+            pass
+
+        def wait(self, timeout: float | None = None) -> None:
+            pass
+
+        def kill(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        entry,
+        "_spawn_backend_child",
+        lambda *_args, **_kwargs: _DummyProc(),
+    )
     monkeypatch.setattr(entry.sys, "frozen", False, raising=False)
     monkeypatch.setattr(entry, "_redirect_output_to_logfile", lambda _root: None)
     monkeypatch.setattr(entry, "_notify_starting", lambda: None)
@@ -782,6 +801,23 @@ def test_main_opens_setup_after_repairing_unloadable_config(
     monkeypatch.delenv("OPENBILICLAW_HOST", raising=False)
     monkeypatch.delenv("OPENBILICLAW_PORT", raising=False)
     monkeypatch.delenv("OPENBILICLAW_SELFTEST", raising=False)
+    monkeypatch.setenv("OPENBILICLAW_WORKER", "0")
+
+    class _DummyProc:
+        def terminate(self) -> None:
+            pass
+
+        def wait(self, timeout: float | None = None) -> None:
+            pass
+
+        def kill(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        entry,
+        "_spawn_backend_child",
+        lambda *_args, **_kwargs: _DummyProc(),
+    )
     monkeypatch.setattr(entry.sys, "frozen", False, raising=False)
     monkeypatch.setattr(entry, "_redirect_output_to_logfile", lambda _root: None)
     monkeypatch.setattr(entry, "_notify_starting", lambda: None)
@@ -860,6 +896,23 @@ def test_main_disables_uvicorn_access_log_in_tray_mode(
     monkeypatch.delenv("OPENBILICLAW_HOST", raising=False)
     monkeypatch.delenv("OPENBILICLAW_PORT", raising=False)
     monkeypatch.delenv("OPENBILICLAW_SELFTEST", raising=False)
+    monkeypatch.setenv("OPENBILICLAW_WORKER", "0")
+
+    class _DummyProc:
+        def terminate(self) -> None:
+            pass
+
+        def wait(self, timeout: float | None = None) -> None:
+            pass
+
+        def kill(self) -> None:
+            pass
+
+    monkeypatch.setattr(
+        entry,
+        "_spawn_backend_child",
+        lambda *_args, **_kwargs: _DummyProc(),
+    )
     monkeypatch.setattr(entry.sys, "frozen", True, raising=False)
     monkeypatch.setattr(entry, "_redirect_output_to_logfile", lambda _root: None)
     monkeypatch.setattr(entry, "_notify_starting", lambda: None)

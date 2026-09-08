@@ -2001,6 +2001,9 @@ def test_run_api_server_prints_degraded_mode_panel(
         )
     )
     run_calls: list[dict[str, object]] = []
+    # This unit test exercises the API server body only; the default
+    # four-process worker mode is covered by startup integration tests.
+    monkeypatch.setenv("OPENBILICLAW_WORKER", "0")
 
     monkeypatch.setattr(
         cli_module,

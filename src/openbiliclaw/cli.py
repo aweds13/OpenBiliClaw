@@ -1125,6 +1125,16 @@ def _start_tailnet_runtime_best_effort(
         return None
 
 
+def _worker_mode_requested() -> bool:
+    """Return whether the four-process background-worker mode is enabled.
+
+    This mode is now the default.  Set ``OPENBILICLAW_WORKER=0`` (or ``false`` /
+    ``no`` / ``off``) to opt back into the legacy single-API-process mode.
+    """
+    value = os.environ.get("OPENBILICLAW_WORKER", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
 def _run_api_server(*, host: str = "127.0.0.1", port: int = 8420) -> None:
     """Run the local FastAPI service used by the browser extension."""
     import uvicorn
@@ -1132,7 +1142,7 @@ def _run_api_server(*, host: str = "127.0.0.1", port: int = 8420) -> None:
     from openbiliclaw.api.app import create_app
     from openbiliclaw.config import load_config
 
-    worker_requested = os.environ.get("OPENBILICLAW_WORKER", "").strip() == "1"
+    worker_requested = _worker_mode_requested()
     if worker_requested:
         # The API process must also know that a full background worker is
         # running; the child worker gets the same flag through the inherited

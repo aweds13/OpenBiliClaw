@@ -1028,6 +1028,35 @@ def _start_packaged_tailnet(runtime_config: Any, host: str, port: int) -> Any | 
         return None
 
 
+def _worker_mode_requested() -> bool:
+    """Return whether the four-process background-worker mode is enabled.
+
+    The packaged desktop app now defaults to the same four-process backend
+    layout as ``openbiliclaw start``: full worker, discovery worker,
+    recommendation server and image proxy.  ``OPENBILICLAW_WORKER=0`` (or
+    ``false`` / ``no`` / ``off``) disables the first three and keeps the image
+    proxy child for compatibility with the CLI fallback mode.
+    """
+    value = os.environ.get("OPENBILICLAW_WORKER", "1").strip().lower()
+    return value not in {"0", "false", "no", "off"}
+
+
+def _spawn_backend_child(module_name: str, *, env: dict[str, str] | None) -> subprocess.Popen:
+    """Spawn a Python backend child in source or frozen desktop mode."""
+    from openbiliclaw.proc import no_window_kwargs
+
+    if getattr(sys, "frozen", False):
+        cmd = [sys.executable, "--openbiliclaw-worker", module_name]
+    else:
+        cmd = [sys.executable, "-m", module_name]
+    return subprocess.Popen(
+        cmd,
+        cwd=os.getcwd(),
+        env=env,
+        **no_window_kwargs(),
+    )
+
+
 def main() -> None:
     project_root, bundled_resources = _resolve_runtime_paths()
     # Windowed (no-console) build: route output to a log file FIRST, before any
@@ -1264,7 +1293,24 @@ def main() -> None:
         daemon=True,
     ).start()
 
-    # Start the server
+    # Start the server.  The desktop package now defaults to the four-process
+    # backend layout: full worker + discovery worker + recommendation server +
+    # image proxy, matching `openbiliclaw start` with OPENBILICLAW_WORKER=1.
+    # Set the flag before create_app() so the API process skips its own
+    # periodic/event-processing loops and delegates them to the children.
+    worker_requested = _worker_mode_requested()
+    if worker_requested:
+        os.environ["OPENBILICLAW_FULL_WORKER"] = "1"
+        data_path = (
+            runtime_config.data_path
+            if runtime_config is not None
+            else project_root / "data"
+        )
+        os.environ.setdefault(
+            "OPENBILICLAW_RECOMMENDATION_SOCK",
+            str(data_path / "runtime" / "recommendation.sock"),
+        )
+
     import uvicorn
 
     app = create_app()
@@ -1279,8 +1325,47 @@ def main() -> None:
 
     listener_sockets = create_wildcard_listener_sockets(host, port)
     tailnet_supervisor = _start_packaged_tailnet(runtime_config, host, port)
+    child_processes: list[subprocess.Popen] = []
 
     try:
+        if worker_requested:
+            child_processes.append(
+                _spawn_backend_child(
+                    "openbiliclaw.worker",
+                    env={**os.environ, "OPENBILICLAW_FULL_WORKER": "1"},
+                )
+            )
+            child_processes.append(
+                _spawn_backend_child(
+                    "openbiliclaw.discovery_worker",
+                    env={
+                        **os.environ,
+                        "OPENBILICLAW_DISCOVERY_WORKER": "1",
+                        "OPENBILICLAW_FULL_WORKER": "1",
+                    },
+                )
+            )
+            child_processes.append(
+                _spawn_backend_child(
+                    "openbiliclaw.recommendation_server",
+                    env={
+                        **os.environ,
+                        "OPENBILICLAW_RECOMMENDATION_ONLY": "1",
+                        "OPENBILICLAW_FULL_WORKER": "1",
+                    },
+                )
+            )
+
+        # The image proxy is always a dedicated child, even in the legacy
+        # single-API-process fallback, so image work cannot stall API serving.
+        child_processes.append(
+            _spawn_backend_child("openbiliclaw.image_service", env={**os.environ})
+        )
+        image_service_port = os.environ.get("OPENBILICLAW_IMAGE_SERVICE_PORT", "8421")
+        os.environ["OPENBILICLAW_IMAGE_SERVICE_URL"] = (
+            f"http://127.0.0.1:{image_service_port}"
+        )
+
         if use_tray:
             # Windowed build: uvicorn runs in the background and a tray icon owns the
             # foreground (Windows system tray / macOS menu bar). No console window
@@ -1296,6 +1381,14 @@ def main() -> None:
             else:
                 server.run()
     finally:
+        for proc in reversed(child_processes):
+            if proc is None:
+                continue
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
         if tailnet_supervisor is not None:
             tailnet_supervisor.stop()
         close_listener_sockets(listener_sockets)
@@ -1303,6 +1396,28 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Frozen desktop child processes are re-executions of the same packaged
+    # executable.  Route them to the requested backend module before the normal
+    # desktop main() (tray/splash/migration) runs.
+    if (
+        getattr(sys, "frozen", False)
+        and len(sys.argv) >= 3
+        and sys.argv[1] == "--openbiliclaw-worker"
+    ):
+        import runpy
+
+        # Child re-executions of the same frozen EXE have no console too, so
+        # send their logs to the same desktop.log as the parent.  Also close
+        # the Windows boot splash as early as possible in each child.
+        child_root = Path(
+            os.environ.get("OPENBILICLAW_PROJECT_ROOT")
+            or _resolve_runtime_paths()[0]
+        )
+        _redirect_output_to_logfile(child_root)
+        _close_splash()
+        runpy.run_module(sys.argv[2], run_name="__main__")
+        raise SystemExit(0)
+
     try:
         main()
     except Exception:
