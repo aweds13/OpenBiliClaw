@@ -61,6 +61,7 @@ class _FlakyAwarenessAnalyzer:
         events: list[dict[str, object]],
         preference: dict[str, object],
         soul_profile: dict[str, object],
+        existing_confusions: list[dict[str, object]] | None = None,
         max_tokens: int = 0,
         source_event_ids: list[int] | None = None,
     ) -> tuple[list[Any], list[dict[str, Any]]]:
@@ -313,6 +314,7 @@ class _RecordingAwarenessAnalyzer:
         events: list[dict[str, object]],
         preference: dict[str, object],
         soul_profile: dict[str, object],
+        existing_confusions: list[dict[str, object]] | None = None,
         max_tokens: int = 0,
         source_event_ids: list[int] | None = None,
     ) -> tuple[list[Any], list[dict[str, Any]]]:
@@ -1006,6 +1008,7 @@ class _GatedAwarenessAnalyzer:
         events: list[dict[str, object]],
         preference: dict[str, object],
         soul_profile: dict[str, object],
+        existing_confusions: list[dict[str, object]] | None = None,
         max_tokens: int = 0,
         source_event_ids: list[int] | None = None,
     ) -> tuple[list[Any], list[dict[str, Any]]]:

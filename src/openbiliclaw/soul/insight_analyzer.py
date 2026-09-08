@@ -289,6 +289,7 @@ class InsightAnalyzer:
             "hypothesis": item.hypothesis,
             "confidence": round(float(item.confidence), 4),
             "validated": bool(item.validated),
+            "user_verdict": str(item.user_verdict or "").strip(),
         }
 
     @staticmethod

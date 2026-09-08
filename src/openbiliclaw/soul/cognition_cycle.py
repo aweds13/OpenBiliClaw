@@ -482,11 +482,13 @@ class CognitionCycle:
         intentional behaviour change vs the legacy ``analyze()`` path — recorded
         via A/B in the PR (quality guardrail). Returns ``(notes, confusions)``.
         """
+        existing_confusions = self._confusion_manager().list_for_generation_context()
         try:
             return await self._awareness_analyzer.analyze_with_confusions(
                 events=events,
                 preference=preference,
                 soul_profile=soul_profile_data,
+                existing_confusions=existing_confusions,
                 max_tokens=self._cognition_max_tokens,
                 source_event_ids=source_event_ids,
             )
@@ -496,6 +498,7 @@ class CognitionCycle:
                 events=events,
                 preference=preference,
                 soul_profile=soul_profile_data,
+                existing_confusions=existing_confusions,
                 max_tokens=self._cognition_max_tokens,
                 source_event_ids=source_event_ids,
             )

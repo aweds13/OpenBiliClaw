@@ -334,6 +334,31 @@ class ConfusionManager:
         """Open + clarifying confusions (injected into the dialogue active list)."""
         return self._list(["open", "clarifying"])
 
+    def list_for_generation_context(self, limit: int = 30) -> list[dict[str, Any]]:
+        """Recent confusion history for LLM generation prompts.
+
+        Returns a compact, deduplicated-by-row view of active plus already
+        resolved/dismissed confusions so the awareness model can avoid
+        recreating a similar objection/ambiguity from scratch.
+        """
+        if self._db is None:
+            return []
+        rows = self._db.list_confusions(
+            statuses=["open", "clarifying", "resolved", "dismissed"],
+            limit=max(1, int(limit)),
+        )
+        return [
+            {
+                "id": int(row.get("id", 0) or 0),
+                "status": str(row.get("status", "") or "").strip().lower(),
+                "topic": str(row.get("topic", "") or "").strip(),
+                "observation": str(row.get("observation", "") or "").strip(),
+                "interpretation": str(row.get("interpretation", "") or "").strip(),
+            }
+            for row in rows
+            if str(row.get("observation", "") or "").strip()
+        ]
+
     def _list(self, statuses: list[str]) -> list[Confusion]:
         if self._db is None:
             return []

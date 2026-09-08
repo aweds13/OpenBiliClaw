@@ -942,7 +942,8 @@ _AWARENESS_WITH_CONFUSIONS_SYSTEM_PROMPT = """
 5. 如果没有真正看不懂的地方，confusions 返回空数组——不要为凑数制造疑惑。
 6. 如果 recent_events 出现 `feedback_type=dislike`、`reaction=thumbs_down` 或 `inferred_satisfaction=negative`，把它当作用户最近开始避开某类内容的信号；可以生成“最近开始避开 X”这类保守观察，但不要把单次 dislike 上升成人格结论。
 7. 负反馈一致性：笔记中描述「点踩 / dislike / 不感兴趣」等明确负反馈行为时，该条 source_event_ids 必须至少包含一条对应的事件（`feedback_type=dislike` 或 `inferred_satisfaction=negative`）；recent_events 里没有这类事件，就绝不能在笔记中声称用户点踩了——只能描述实际观察到的浏览行为。
-8. 详细输入（画像 / 偏好摘要 / 近期事件）见 user message 的 X / Y / Z 各段。
+8. existing_confusions（如有）是已经存在或处理过的疑惑历史，仅作上下文参考。若本次观察与其中某条 `topic / observation` 近似重复，不要重新生成一条换措辞的疑惑；如果确实是在同一疑惑上新证据，也要让它继续留在历史里，而不是重复建新行。
+9. 详细输入（画像 / 偏好摘要 / 近期事件 / 已有疑惑）见 user message 的各段。
 </rules>
 
 <output_schema>
@@ -975,6 +976,7 @@ def build_awareness_with_confusions_prompt(
     events: list[dict[str, object]],
     preference_summary: dict[str, object],
     soul_profile: dict[str, object],
+    existing_confusions: list[dict[str, object]] | None = None,
     input_view: str = "legacy",
 ) -> list[dict[str, str]]:
     """Build the awareness+confusions prompt (Phase 2).
@@ -1035,6 +1037,17 @@ def build_awareness_with_confusions_prompt(
                 ),
                 "</active_insights>",
             ]
+        if existing_confusions:
+            sections += [
+                "<existing_confusions>",
+                json.dumps(
+                    existing_confusions,
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                ),
+                "</existing_confusions>",
+            ]
         sections += [
             "<recent_events>",
             json.dumps(
@@ -1050,24 +1063,36 @@ def build_awareness_with_confusions_prompt(
             {"role": "user", "content": "\n\n".join(sections)},
         ]
 
-    user_prompt = "\n\n".join(
-        [
-            "<soul_profile>",
-            json.dumps(soul_profile, ensure_ascii=False, indent=2, sort_keys=True),
-            "</soul_profile>",
-            "<preference_summary>",
-            json.dumps(preference_summary, ensure_ascii=False, indent=2, sort_keys=True),
-            "</preference_summary>",
-            "<recent_events>",
+    user_sections = [
+        "<soul_profile>",
+        json.dumps(soul_profile, ensure_ascii=False, indent=2, sort_keys=True),
+        "</soul_profile>",
+        "<preference_summary>",
+        json.dumps(preference_summary, ensure_ascii=False, indent=2, sort_keys=True),
+        "</preference_summary>",
+    ]
+    if existing_confusions:
+        user_sections += [
+            "<existing_confusions>",
             json.dumps(
-                rendered_events,
+                existing_confusions,
                 ensure_ascii=False,
                 indent=2,
                 sort_keys=True,
             ),
-            "</recent_events>",
+            "</existing_confusions>",
         ]
-    )
+    user_sections += [
+        "<recent_events>",
+        json.dumps(
+            rendered_events,
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        ),
+        "</recent_events>",
+    ]
+    user_prompt = "\n\n".join(user_sections)
     return [
         {"role": "system", "content": _AWARENESS_WITH_CONFUSIONS_SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt},
@@ -1084,7 +1109,7 @@ _INSIGHT_SYSTEM_PROMPT = """
 2. hypothesis 是假设，不是结论，措辞必须保守。
 3. 每条必须附 1~3 条 evidence。
 4. confidence 保持在 0~1，且不要过高。
-5. existing_hypotheses（如有）是当前已有的活跃假设，仅作上下文参考。本次新的觉察笔记若印证某条已有假设，可重述同一 hypothesis 文本以累积其证据/置信；若指向新方向，再生成新假设。不要为凑数而重复已有假设。
+5. existing_hypotheses（如有）是当前已有的活跃假设，仅作上下文参考。本次新的觉察笔记若印证某条已有假设，可重述同一 hypothesis 文本以累积其证据/置信；若指向新方向，再生成新假设。不要为凑数而重复已有假设；尤其不要生成与已有假设中 `validated=true` 或 `user_verdict=confirmed / rejected` 条目意思近似、仅换措辞的新假设。
 6. 只依据本次觉察笔记里的新信号下结论；existing_hypotheses 本身不是新证据。
 </rules>
 

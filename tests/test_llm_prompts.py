@@ -448,6 +448,38 @@ def test_awareness_prompts_require_evidence_for_dislike_claims() -> None:
         assert "绝不能在笔记中声称用户点踩" in system_prompt
 
 
+def test_build_awareness_with_confusions_prompt_includes_existing_confusions() -> None:
+    from openbiliclaw.llm.prompts import build_awareness_with_confusions_prompt
+
+    messages = build_awareness_with_confusions_prompt(
+        events=[{"event_type": "view", "title": "最新事件"}],
+        preference_summary={"interests": ["稳定偏好"]},
+        soul_profile={"core_traits": ["稳定画像"]},
+        existing_confusions=[
+            {
+                "id": 1,
+                "status": "open",
+                "topic": "城市菜市场与社区商业观察",
+                "observation": "反复停留但从不购买",
+                "interpretation": "可能是社区观察型兴趣",
+            },
+            {
+                "id": 2,
+                "status": "resolved",
+                "topic": "已经处理过的疑惑",
+                "observation": "历史确认过",
+                "interpretation": "无需再问",
+            },
+        ],
+    )
+
+    user = messages[1]["content"]
+    assert "<existing_confusions>" in user
+    assert "</existing_confusions>" in user
+    assert "城市菜市场与社区商业观察" in user
+    assert "已经处理过的疑惑" in user
+
+
 def test_build_awareness_prompt_user_block_ends_with_recent_events() -> None:
     """Recent events is the most-variable block and must be the suffix.
     Anything stable after it would shrink the cache prefix on every call."""
