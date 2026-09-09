@@ -96,6 +96,8 @@
 
 - **learned scorer 安全校准闭环（eval_scorer）**：`[discovery].eval_scorer` 默认 `"llm"` 保持既有行为，并在桌面 Web / 扩展「高级功能」中显示为 `Agent（默认）`；用户可显式切换 `Shadow（校准观察）` 或 `Learned（仅相关性，实验性）`，保存后经同一配置 API 热重载。注册策略与回填策略复用顶层 evaluator，直连发现、统一候选流水线和单条评估不再绕回默认 Agent。`shadow` 并跑 learned + 完整 LLM、由 LLM 决定产品 relevance 并落完整隐私安全对照，人工运行只读 gate 并确认通过后才应选择 `learned` hybrid relevance。learned 模式仍保留 LLM temporal / topic / style / franchise 元数据，且审计失败、非法分数 / 向量 / digest 或不完整 LLM 成员均 fail-open；gate 拒绝不完整 telemetry、零 admission 和缺失指标。切换只影响后续候选，不重算已有推荐；本版本不减少 LLM 调用。
 
+- **贡献者致谢**：该功能初始 PR 由 [@aweds13](https://github.com/aweds13) 提交（[PR #228](https://github.com/whiteguo233/OpenBiliClaw/pull/228)）；随后由 [@whiteguo233](https://github.com/whiteguo233) 接管完善并合入。
+
 ## v0.3.220：Windows 推荐进程修复与保存键扩展（2026-09-09）
 
 - **修复 Windows 下高并发 JSON 原子写入偶发 WinError 5（issue #229）**：`_atomic_write_json()` 在 Windows 上多线程/多进程竞争替换同一状态文件时，`os.replace()` 会短暂抛出 `PermissionError: [WinError 5] 拒绝访问`，导致探索缓冲等状态更新丢失。现在替换阶段对瞬时 `PermissionError` 增加带随机抖动的指数退避重试，重试耗尽才向上抛出。
