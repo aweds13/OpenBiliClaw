@@ -81,13 +81,19 @@ def _repository_metadata() -> dict[str, object]:
     dirty = True
     try:
         commit_result = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT, check=True,
-            capture_output=True, text=True,
+            ["git", "rev-parse", "HEAD"],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
         )
         commit = commit_result.stdout.strip() or "unknown"
         status_result = subprocess.run(
-            ["git", "status", "--porcelain"], cwd=PROJECT_ROOT, check=True,
-            capture_output=True, text=True,
+            ["git", "status", "--porcelain"],
+            cwd=PROJECT_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
         )
         dirty = bool(status_result.stdout.strip())
     except (OSError, subprocess.SubprocessError):
@@ -106,15 +112,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--db", type=Path, required=True, help="Path to openbiliclaw.db")
     parser.add_argument(
-        "--after-id", type=int, default=0,
+        "--after-id",
+        type=int,
+        default=0,
         help="Exclude rows at or below this audit id.",
     )
     parser.add_argument(
-        "--through-id", type=int, default=None,
+        "--through-id",
+        type=int,
+        default=None,
         help="Optional inclusive frozen upper audit id; defaults to current maximum.",
     )
     parser.add_argument(
-        "--output", type=Path, default=None,
+        "--output",
+        type=Path,
+        default=None,
         help="Optional path for the sanitized aggregate JSON artifact.",
     )
     return parser
@@ -123,7 +135,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     rows, frozen_max, source_status = _read_frozen_rows(
-        args.db, after_id=args.after_id, through_id=args.through_id,
+        args.db,
+        after_id=args.after_id,
+        through_id=args.through_id,
     )
     report = evaluate_learned_scorer_gate(rows).to_dict()
     report["cohort"] = {
