@@ -565,6 +565,30 @@ class BilibiliAPIClient:
             mid=int(data.get("mid", 0)),
         )
 
+    async def _get_video_view_data(self, bvid: str) -> dict[str, Any]:
+        """Fetch the /view data object, falling back to the WBI-signed endpoint.
+
+        Bilibili occasionally bans the plain ``/x/web-interface/view`` endpoint
+        for a given network/IP (HTTP 412). The WBI-signed sibling
+        ``/x/web-interface/wbi/view`` is still accepted by the web API and is
+        the standard web client path for this payload.
+        """
+        try:
+            return await self._get_json("/x/web-interface/view", params={"bvid": bvid})
+        except BilibiliAPIError as exc:
+            if exc.code != -412:
+                raise
+            logger.warning(
+                "Bilibili plain /view blocked with 412; retrying via WBI view (bvid=%s)",
+                bvid,
+            )
+            img_key, sub_key = await self._get_wbi_keys()
+            signed = self._sign_wbi_params({"bvid": bvid}, img_key=img_key, sub_key=sub_key)
+            return await self._get_json(
+                "/x/web-interface/wbi/view",
+                params=signed,
+            )
+
     async def get_video_info(self, bvid: str) -> VideoInfo:
         """Get video information by BV ID.
 
@@ -574,13 +598,7 @@ class BilibiliAPIClient:
         Returns:
             VideoInfo dataclass.
         """
-        resp = await self._client.get(
-            f"{self._BASE_URL}/x/web-interface/view",
-            params={"bvid": bvid},
-        )
-        resp.raise_for_status()
-        payload = _json_object(resp.json())
-        data = _json_object(payload.get("data"))
+        data = await self._get_video_view_data(bvid)
         stat = _json_object(data.get("stat", {}))
         owner = _json_object(data.get("owner", {}))
 
@@ -1181,7 +1199,7 @@ class BilibiliAPIClient:
 
     async def _resolve_aid(self, bvid: str) -> int:
         """Resolve a BV ID through the application-code-aware view endpoint."""
-        data = await self._get_json("/x/web-interface/view", params={"bvid": bvid})
+        data = await self._get_video_view_data(bvid)
         aid = data.get("aid")
         if isinstance(aid, bool) or not isinstance(aid, int) or aid <= 0:
             raise BilibiliAPIError("Bilibili returned an invalid video aid")
