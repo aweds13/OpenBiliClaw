@@ -41,6 +41,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from openbiliclaw.recommendation_runtime import ensure_recommendation_transport_env
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from typing import Any
@@ -1306,10 +1308,7 @@ def main() -> None:
             if runtime_config is not None
             else project_root / "data"
         )
-        os.environ.setdefault(
-            "OPENBILICLAW_RECOMMENDATION_SOCK",
-            str(data_path / "runtime" / "recommendation.sock"),
-        )
+        ensure_recommendation_transport_env(data_path)
 
     import uvicorn
 

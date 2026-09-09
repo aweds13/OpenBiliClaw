@@ -28,6 +28,7 @@ from rich.text import Text
 from openbiliclaw.llm.base import safe_llm_failure_message
 from openbiliclaw.llm.service import _background_admission_bypass
 from openbiliclaw.published_time import format_published_time
+from openbiliclaw.recommendation_runtime import ensure_recommendation_transport_env
 from openbiliclaw.runtime.ollama_supervisor import (
     _is_default_ollama_endpoint,
     _ollama_is_running,
@@ -1148,9 +1149,8 @@ def _run_api_server(*, host: str = "127.0.0.1", port: int = 8420) -> None:
         # running; the child worker gets the same flag through the inherited
         # environment below.
         os.environ["OPENBILICLAW_FULL_WORKER"] = "1"
-        os.environ.setdefault(
-            "OPENBILICLAW_RECOMMENDATION_SOCK",
-            str(load_config().data_path / "runtime" / "recommendation.sock"),
+        recommendation_transport = ensure_recommendation_transport_env(
+            load_config().data_path
         )
 
     api_app = create_app()
@@ -1246,15 +1246,11 @@ def _run_api_server(*, host: str = "127.0.0.1", port: int = 8420) -> None:
                 cwd=os.getcwd(),
                 env=recommendation_env,
             )
-            recommendation_sock = os.environ.get(
-                "OPENBILICLAW_RECOMMENDATION_SOCK",
-                "recommendation.sock",
-            )
             _print_status_panel(
                 "info",
                 "Recommendation API 进程",
                 f"已启动独立推荐 API pid={recommendation_process.pid}"
-                f"（Unix socket {recommendation_sock}）",
+                f"（{recommendation_transport}）",
             )
 
         # Dedicated image proxy process: image fetching/compression lives here,

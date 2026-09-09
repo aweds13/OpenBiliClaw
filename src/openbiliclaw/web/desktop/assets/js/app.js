@@ -8083,6 +8083,15 @@ ${cardFeedbackBarHtml()}`;
 
     function renderPoolStatus(status = state.runtimeStatus) {
       const runtime = normalizeRuntimeStatus(status);
+      if (!runtime) {
+        $("#metricPool").textContent = "—";
+        $("#poolAvailable").textContent = "同步失败，正在重试";
+        $("#poolReplenished").textContent = "—";
+        $("#poolTopics").textContent = "—";
+        $("#poolRefreshState").textContent = "—";
+        renderDesktopRuntimeFailure();
+        return;
+      }
       $("#metricPool").textContent = String(runtime.pool_available_count);
       const summary = getPoolStatusSummary(runtime);
       $("#poolAvailable").textContent = summary?.available || "后端未初始化";

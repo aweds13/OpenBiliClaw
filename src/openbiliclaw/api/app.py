@@ -206,6 +206,11 @@ from openbiliclaw.discovery.temporal import (
     is_complete_temporal_evidence_marker,
 )
 from openbiliclaw.llm.base import safe_llm_failure_message
+from openbiliclaw.recommendation_runtime import (
+    RECOMMENDATION_PORT_ENV,
+    RECOMMENDATION_SOCK_ENV,
+    recommendation_transport_enabled,
+)
 from openbiliclaw.runtime import embedding_progress
 from openbiliclaw.runtime.dialogue_reply_scheduler import (
     DialogueExecutionCoordinator,
@@ -2838,7 +2843,7 @@ def create_app(
 
     if (
         os.environ.get("OPENBILICLAW_RECOMMENDATION_ONLY", "").strip() != "1"
-        and os.environ.get("OPENBILICLAW_RECOMMENDATION_SOCK", "").strip()
+        and recommendation_transport_enabled()
     ):
         import httpx as _httpx
 
@@ -2846,22 +2851,31 @@ def create_app(
         async def proxy_recommendation_api(request: Request, call_next: Any) -> Any:
             if not request.url.path.startswith("/api/recommendations"):
                 return await call_next(request)
-            target_url = f"http://localhost{request.url.path}"
-            if request.url.query:
-                target_url += f"?{request.url.query}"
             headers = {
                 key: value
                 for key, value in request.headers.items()
                 if key.lower() not in {"host", "content-length", "connection"}
             }
             body = await request.body()
-            transport = _httpx.AsyncHTTPTransport(
-                uds=os.environ["OPENBILICLAW_RECOMMENDATION_SOCK"]
-            )
+            recommendation_port = os.environ.get(RECOMMENDATION_PORT_ENV, "").strip()
+            if recommendation_port:
+                target_url = (
+                    f"http://127.0.0.1:{recommendation_port}{request.url.path}"
+                )
+                client_kwargs: dict[str, Any] = {"timeout": 30.0, "trust_env": False}
+            else:
+                target_url = f"http://localhost{request.url.path}"
+                client_kwargs = {
+                    "transport": _httpx.AsyncHTTPTransport(
+                        uds=os.environ[RECOMMENDATION_SOCK_ENV]
+                    ),
+                    "timeout": 30.0,
+                    "trust_env": False,
+                }
+            if request.url.query:
+                target_url += f"?{request.url.query}"
             try:
-                async with _httpx.AsyncClient(
-                    transport=transport, timeout=30.0, trust_env=False
-                ) as client:
+                async with _httpx.AsyncClient(**client_kwargs) as client:
                     upstream = await client.request(
                         request.method,
                         target_url,
@@ -8124,7 +8138,7 @@ def create_app(
     @app.on_event("startup")
     async def startup_refresh_loop() -> None:
         if (
-            os.environ.get("OPENBILICLAW_RECOMMENDATION_SOCK", "").strip()
+            recommendation_transport_enabled()
             and os.environ.get("OPENBILICLAW_RECOMMENDATION_ONLY", "").strip() != "1"
         ):
             app.state.pool_inventory_watch_task = asyncio.create_task(

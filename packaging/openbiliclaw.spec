@@ -195,6 +195,7 @@ a = Analysis(
         "openbiliclaw.worker.__main__",
         "openbiliclaw.worker.main",
         "openbiliclaw.discovery_worker",
+        "openbiliclaw.recommendation_runtime",
         "openbiliclaw.recommendation_server",
         "openbiliclaw.image_service",
         # --- LLM / platform modules ---
