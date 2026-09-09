@@ -7299,6 +7299,36 @@ def create_app(
         finally:
             await client.close()
 
+    @app.get("/api/bilibili/video/info")
+    async def bilibili_video_info(bvid: str = Query(...)) -> dict[str, Any]:
+        """Return Bilibili video metadata for the mobile native player intro tab.
+
+        Uses the WBI-signed view fallback so metadata (desc / owner / stat)
+        still works when the plain ``/x/web-interface/view`` endpoint is
+        blocked by Bilibili risk control on the current network.
+        """
+        from openbiliclaw.bilibili.api import BilibiliAPIClient, BilibiliAPIError
+        from openbiliclaw.bilibili.auth import resolve_runtime_cookie
+        from openbiliclaw.config import load_config
+
+        cfg = _pin_active_runtime_config(load_config())
+        cookie = resolve_runtime_cookie(
+            data_dir=cfg.data_path,
+            configured_cookie=str(getattr(cfg.bilibili, "cookie", "") or ""),
+        )
+        if not cookie:
+            raise HTTPException(status_code=401, detail="B站 Cookie 未配置或已失效")
+        client = BilibiliAPIClient(
+            cookie=cookie,
+            proxy=(getattr(cfg.bilibili, "proxy", None) or None),
+        )
+        try:
+            return await client.get_video_view_data(bvid)
+        except BilibiliAPIError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        finally:
+            await client.close()
+
     @app.post("/api/bilibili/video/like")
     async def bilibili_video_like(payload: Annotated[dict[str, Any], Body()]) -> dict[str, Any]:
         from openbiliclaw.bilibili.api import BilibiliAPIClient, BilibiliAPIError

@@ -565,7 +565,7 @@ class BilibiliAPIClient:
             mid=int(data.get("mid", 0)),
         )
 
-    async def _get_video_view_data(self, bvid: str) -> dict[str, Any]:
+    async def get_video_view_data(self, bvid: str) -> dict[str, Any]:
         """Fetch the /view data object, falling back to the WBI-signed endpoint.
 
         Bilibili occasionally bans the plain ``/x/web-interface/view`` endpoint
@@ -598,7 +598,7 @@ class BilibiliAPIClient:
         Returns:
             VideoInfo dataclass.
         """
-        data = await self._get_video_view_data(bvid)
+        data = await self.get_video_view_data(bvid)
         stat = _json_object(data.get("stat", {}))
         owner = _json_object(data.get("owner", {}))
 
@@ -1199,7 +1199,7 @@ class BilibiliAPIClient:
 
     async def _resolve_aid(self, bvid: str) -> int:
         """Resolve a BV ID through the application-code-aware view endpoint."""
-        data = await self._get_video_view_data(bvid)
+        data = await self.get_video_view_data(bvid)
         aid = data.get("aid")
         if isinstance(aid, bool) or not isinstance(aid, int) or aid <= 0:
             raise BilibiliAPIError("Bilibili returned an invalid video aid")
