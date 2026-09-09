@@ -8,7 +8,7 @@
 
 - **修复 Windows 端 v0.3.219 启动崩溃（issue #234）**：Windows 的 asyncio/uvicorn 不支持 Unix socket，独立推荐进程改为监听 `127.0.0.1:8423` 回环 TCP，主 API 改用 HTTP 代理；POSIX 仍保留 Unix socket。同时为桌面 Web 的 `renderPoolStatus` 增加 `null` 状态保护。
 - **允许 Linux.do 主题类型内容 ID 保存**：saved-item key 校验新增 `linuxdo:topic:<positive-id>` 规范键，与既有知乎 / GitHub typed-content 规则保持一致。
-- **发布状态**：后端 / 浏览器插件 / 桌面安装包版本统一为 `v0.3.220`；插件市场提交见后续状态更新。
+- **发布状态**：后端源码 / 浏览器插件 / 桌面安装包 / Docker 镜像与聚合 Release 均已发布为 `v0.3.220`；Chrome Web Store 已上传并提交 `0.3.220` 审核；Firefox AMO 已提交 listed `0.3.220`。
 
 ## v0.3.219：四进程后台模式默认开启（2026-09-09）
 
