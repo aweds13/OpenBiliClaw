@@ -4,12 +4,17 @@
 
 ---
 
+## v0.3.220：Windows 推荐进程修复与保存键扩展（2026-09-09）
+
+- **修复 Windows 端 v0.3.219 启动崩溃（issue #234）**：Windows 的 asyncio/uvicorn 不支持 Unix socket，独立推荐进程改为监听 `127.0.0.1:8423` 回环 TCP，主 API 改用 HTTP 代理；POSIX 仍保留 Unix socket。同时为桌面 Web 的 `renderPoolStatus` 增加 `null` 状态保护。
+- **允许 Linux.do 主题类型内容 ID 保存**：saved-item key 校验新增 `linuxdo:topic:<positive-id>` 规范键，与既有知乎 / GitHub typed-content 规则保持一致。
+- **发布状态**：后端 / 浏览器插件 / 桌面安装包版本统一为 `v0.3.220`；插件市场提交见后续状态更新。
+
 ## v0.3.219：四进程后台模式默认开启（2026-09-09）
 
 - **默认启动改为四进程后台模式**：`openbiliclaw start` / `serve-api` 以及桌面安装包现在默认拉起 `full worker`、`discovery worker`、独立推荐进程和独立图片代理；API 主进程不再承担重后台负载。仍可用 `OPENBILICLAW_WORKER=0`（`false` / `no` / `off`）回退到旧的单 API 进程模式。
 - **桌面安装包同步接入四进程模式**：PyInstaller 冻结版通过 `--openbiliclaw-worker` 子进程复用同一个 EXE 运行 worker 模块，子进程日志写入同一个 `logs/desktop.log`，并在启动时关闭子进程 splash。
 - **发布版本对齐**：后端、浏览器插件、桌面安装包统一为 `v0.3.219`；客户端配套版本为移动端 `v0.3.153+1`。
-- **修复 Windows 端 v0.3.219 启动崩溃（issue #234）**：Windows 的 asyncio/uvicorn 不支持 Unix socket，独立推荐进程改为监听 `127.0.0.1:8423` 回环 TCP，主 API 改用 HTTP 代理；POSIX 仍保留 Unix socket。同时为桌面 Web 的 `renderPoolStatus` 增加 `null` 状态保护。
 
 ## v0.3.218：Latest Release 版本确认（2026-09-04）
 
