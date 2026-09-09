@@ -40,6 +40,7 @@ _SAVED_PLATFORM_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
 _URL_FALLBACK_ID_RE = re.compile(r"[0-9a-f]{24}")
 _ZHIHU_TYPED_CONTENT_ID_RE = re.compile(r"(?:question|answer|article):[0-9]+")
 _GITHUB_TYPED_CONTENT_ID_RE = re.compile(r"repository:[1-9][0-9]*")
+_LINUXDO_TYPED_CONTENT_ID_RE = re.compile(r"topic:[1-9][0-9]*")
 IdempotencyKey = Annotated[
     StrictStr,
     StringConstraints(strip_whitespace=True, min_length=1, max_length=400),
@@ -1709,6 +1710,11 @@ def validate_saved_item_key(value: str) -> str:
         and platform == "github"
         and _GITHUB_TYPED_CONTENT_ID_RE.fullmatch(":".join(parts[1:])) is not None
     )
+    linuxdo_typed_key = (
+        len(parts) == 3
+        and platform == "linuxdo"
+        and _LINUXDO_TYPED_CONTENT_ID_RE.fullmatch(":".join(parts[1:])) is not None
+    )
     url_fallback_key = (
         len(parts) == 3
         and parts[1] == "url"
@@ -1716,7 +1722,13 @@ def validate_saved_item_key(value: str) -> str:
     )
     if (
         not platform
-        or not (stable_key or zhihu_typed_key or github_typed_key or url_fallback_key)
+        or not (
+            stable_key
+            or zhihu_typed_key
+            or github_typed_key
+            or linuxdo_typed_key
+            or url_fallback_key
+        )
         or canonical_source_platform(platform) != platform
         or _SAVED_PLATFORM_RE.fullmatch(platform) is None
     ):
@@ -1800,8 +1812,11 @@ class SavedItemIn(BaseModel):
         typed_github_id = (
             platform == "github" and _GITHUB_TYPED_CONTENT_ID_RE.fullmatch(value) is not None
         )
+        typed_linuxdo_id = (
+            platform == "linuxdo" and _LINUXDO_TYPED_CONTENT_ID_RE.fullmatch(value) is not None
+        )
         if (
-            (":" in value and not (typed_zhihu_id or typed_github_id))
+            (":" in value and not (typed_zhihu_id or typed_github_id or typed_linuxdo_id))
             or _has_identity_whitespace(value)
             or _has_unicode_control(value)
         ):

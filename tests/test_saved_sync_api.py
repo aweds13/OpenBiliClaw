@@ -300,6 +300,57 @@ def test_github_repository_save_rejects_noncanonical_typed_ids(
     assert adapter.calls == []
 
 
+def test_linuxdo_topic_save_accepts_typed_content_id(
+    saved_sync_client: tuple[TestClient, Database, _FakeBilibiliAdapter],
+) -> None:
+    client, database, adapter = saved_sync_client
+    content_id = "topic:4242"
+    item_key = f"linuxdo:{content_id}"
+
+    saved = client.post(
+        "/api/saved/watch_later",
+        json=_saved_item(
+            content_id,
+            source_platform="linuxdo",
+            content_url="https://linux.do/t/4242",
+            content_type="post",
+            cover_url="",
+        ),
+    )
+
+    assert saved.status_code == 200
+    assert saved.json()["item_key"] == item_key
+    assert saved.json()["sync_status"] == "pending"
+    assert database.get_saved_membership("watch_later", item_key) is not None
+    assert adapter.calls == []
+
+
+@pytest.mark.parametrize(
+    "content_id",
+    ["topic:0", "topic:-1", "post:1", "topic:1:extra", "topic:"],
+)
+def test_linuxdo_topic_save_rejects_noncanonical_typed_ids(
+    saved_sync_client: tuple[TestClient, Database, _FakeBilibiliAdapter],
+    content_id: str,
+) -> None:
+    client, database, adapter = saved_sync_client
+
+    response = client.post(
+        "/api/saved/watch_later",
+        json=_saved_item(
+            content_id,
+            source_platform="linuxdo",
+            content_url="https://linux.do/t/4242",
+            content_type="post",
+            cover_url="",
+        ),
+    )
+
+    assert response.status_code == 422
+    assert database.conn.execute("SELECT COUNT(*) FROM saved_memberships").fetchone()[0] == 0
+    assert adapter.calls == []
+
+
 def test_auto_sync_returns_pending_task_without_waiting_for_platform_io(
     saved_sync_client: tuple[TestClient, Database, _FakeBilibiliAdapter],
 ) -> None:
